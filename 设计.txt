@@ -1,0 +1,119 @@
+### 跨平台 Web 终端远程控制系统需求设计文档
+
+#### 一、项目概述与核心目标
+
+本项目旨在开发一个轻量级、跨平台的 Web 终端服务程序。该程序允许用户在 Windows 10/11、Linux 或 macOS 上运行一个后台服务，并通过手机或电脑的浏览器远程访问该终端。
+
+核心特性包括：
+
+- **全平台支持**：后端程序需支持 Windows 10/11、macOS 和 Linux，且能在 Linux 环境下交叉编译出所有平台的二进制文件。
+- **Web 端控制**：无需安装客户端 App，通过浏览器（Chrome/Safari 等）即可访问。
+- **TUI 完美支持**：前端需能正确渲染 ANSI 转义码，支持光标移动、颜色变化等 TUI 特性。
+- **会话持久化**：浏览器断开连接后，后台 Shell 进程（如 PowerShell/Bash）及运行的任务不中断，支持后续重新连接。
+- **安全认证**：通过 Token 机制防止未授权访问。
+- **增强的移动端交互**：提供可隐藏的特殊软键盘，支持组合键操作。
+- **会话管理**：左侧边栏提供终端会话列表，支持新建、切换、关闭、命名指定终端。
+- **终端输出导出**：支持将终端输出导出为文本文件。
+
+#### 二、技术栈规范
+
+- **开发语言**：Go (Golang 1.20+)
+- **核心库**：
+    - Web 框架：`github.com/gin-gonic/gin`
+    - WebSocket：`github.com/gorilla/websocket`
+    - 伪终端：`github.com/creack/pty` (关键依赖，用于模拟终端行为)
+- **前端技术**：
+    - 核心库：`xterm.js` (用于渲染终端界面)
+    - 辅助库：`xterm-addon-fit` (用于自适应大小)
+    - UI 框架：原生 JavaScript 或轻量级框架（如 Vue.js/React，可选）
+
+#### 三、系统架构设计
+
+系统采用 C/S 架构，但服务端为“单文件二进制”分发模式。
+
+**逻辑架构**：
+
+- **前端层**：单页应用，负责渲染 `xterm.js`，捕获键盘输入，通过 WebSocket 发送数据，并处理 Token 验证。
+- **后端层**：
+    - **HTTP Server**：托管静态网页，处理 Token 验证握手。
+    - **Session Manager**：管理活跃的 PTY 会话，维护 `SessionID -> Process` 的映射关系。
+    - **PTY Handler**：负责与操作系统交互，启动 Shell，处理输入输出流的读写。
+- **系统层**：根据操作系统类型，调用对应的 Shell（Windows 调用 PowerShell，Linux/macOS 调用 Bash/Zsh）。
+
+#### 四、详细功能模块需求
+
+**后端模块**
+
+- **跨平台 Shell 适配**：
+    - 程序启动时需检测 `runtime.GOOS`。
+    - Windows：启动命令 `powershell.exe -NoLogo -ExecutionPolicy Bypass`。
+    - Linux：启动命令 `/bin/bash` (或读取 `$SHELL` 环境变量)。
+    - macOS：启动命令 `/bin/zsh` (或 `/bin/bash`)。
+- **PTY 会话管理**：
+    - 使用 `creack/pty` 库启动子进程，确保支持 TUI。
+    - 实现 `SessionPool`，使用 `sync.Map` 存储活跃会话。
+    - **保活逻辑**：当 WebSocket 连接断开时，**严禁**杀死子进程。子进程应继续在后台运行，直到用户显式退出或进程自然结束。
+    - **重连逻辑**：WebSocket 连接时携带 `session_id`，若该 ID 存在且进程存活，则直接将当前 WebSocket 绑定到该进程的输入输出流。
+- **安全认证**：
+    - 配置文件或启动参数支持设置 `ACCESS_TOKEN`。
+    - WebSocket 握手时校验 Token，校验失败直接关闭连接。
+- **会话管理 API**：
+    - 提供 HTTP API 用于前端获取会话列表、新建会话、关闭会话、重命名会话。
+
+**前端模块**
+
+- **终端渲染**：
+    - 使用 `xterm.js` 初始化终端。
+    - 监听 WebSocket 消息并调用 `terminal.write(data)`。
+- **移动端适配**：
+    - 检测 User-Agent，若为移动端，需在屏幕底部渲染一个虚拟键盘栏。
+    - 虚拟键需包含：`Esc`, `Tab`, `Ctrl`, `Alt`, `↑`, `↓`, `←`, `→`，这些是操作 TUI 的刚需。
+    - 虚拟键盘需支持按住状态（例如，按住 `Ctrl` 后再按其他键，发送组合键）。
+    - 虚拟键盘需支持隐藏/显示切换。
+- **连接管理**：
+    - 页面加载时弹出输入框要求输入 Token。
+    - 自动检测窗口大小变化，并通过 WebSocket 发送 `resize` 事件给后端，后端需同步调整 PTY 窗口大小。
+- **会话列表与操作**：
+    - 页面左侧需提供侧边栏，显示当前所有活跃终端会话列表。
+    - 侧边栏需提供按钮用于新建会话、切换会话、关闭会话、重命名会话。
+- **终端输出导出**：
+    - 页面需提供按钮，用于将当前终端的输出内容导出为文本文件。
+
+#### 五、交叉编译与构建需求
+
+项目必须提供在 Linux/Windows 环境下构建所有平台版本的脚本。
+
+- **Windows 构建**：`GOOS=windows GOARCH=amd64`
+- **macOS 构建**：`GOOS=darwin GOARCH=amd64` (Intel) 和 `GOOS=darwin GOARCH=arm64` (M1/M2)。
+- **Linux 构建**：`GOOS=linux GOARCH=amd64`
+- **产物**：所有依赖需静态链接，生成单一可执行文件，无外部 DLL 依赖。
+
+#### 六、开发验收标准
+
+- **TUI 测试**：在网页终端中运行 `vim` 或 `htop` (Linux/Mac) 或 `winget` (Win)，界面应正常显示，光标移动无乱码。
+- **断连测试**：
+    1. 手机连接，运行 `ping 8.8.8.8 -t`。
+    2. 关闭手机浏览器。
+    3. 等待 10 秒。
+    4. 电脑浏览器连接同一 Session ID。
+    5. **结果**：应能看到 `ping` 命令仍在继续输出，未中断。
+- **安全测试**：输入错误的 Token 应无法建立 WebSocket 连接。
+- **移动端交互测试**：虚拟键盘应能正常显示/隐藏，组合键操作应能正确发送。
+- **会话管理测试**：侧边栏应能正确显示会话列表，新建、切换、关闭、重命名会话功能应正常工作。
+- **导出功能测试**：点击导出按钮应能正确下载终端输出文本文件。
+
+#### 七、附录：目录结构建议
+
+```
+/project-root
+  ├── main.go            # 入口文件，包含路由和配置
+  ├── session.go         # 会话管理逻辑 (Pool, Attach, Detach)
+  ├── pty.go             # 跨平台 PTY 实现 (利用 build tags 区分 win/unix)
+  ├── static/
+  │   ├── index.html     # 前端页面
+  │   └── xterm.js       # 前端依赖
+  └── build.sh           # 交叉编译脚本
+```
+
+
+

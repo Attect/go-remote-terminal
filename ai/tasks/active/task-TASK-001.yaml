@@ -1,0 +1,196 @@
+version: "1.0"
+
+metadata:
+  id: "TASK-001"
+  title: "跨平台Web终端远程控制系统 - 整体实现"
+  description: |
+    根据设计.txt文档，实现一个轻量级跨平台Web终端远程控制系统。
+    核心功能包括：PTY会话管理、WebSocket通信、Token安全认证、
+    移动端虚拟键盘、会话侧边栏管理、终端输出导出等。
+  type: "feature"
+  priority: "P0"
+  scope: "整体"
+
+assignment:
+  created_by: "product-manager"
+  created_at: "2026-04-21T10:00:00Z"
+  assignee: "code-builder"
+  assigned_at: "2026-04-21T12:00:00Z"
+  parent_task: null
+  sub_tasks: []
+
+status:
+  current: "completed"
+  progress_percent: 100
+  started_at: "2026-04-21T10:10:00Z"
+  estimated_completion: null
+  actual_completion: "2026-04-21T19:00:00Z"
+
+context:
+  requirements_file: "ai/user_say.md"
+  architecture_file: "ai/dev/project.md"
+  related_files:
+    - "设计.txt"
+  constraints:
+    - "Go 1.20+ 语言开发"
+    - "使用gin + gorilla/websocket + creack/pty"
+    - "前端使用xterm.js"
+    - "单文件二进制分发模式"
+    - "交叉编译支持Windows/macOS/Linux"
+  dependencies: []
+
+specification:
+  acceptance_criteria:
+    - criterion: "后端PTY会话管理功能完整，支持创建/切换/关闭/重命名会话"
+      status: "completed"
+    - criterion: "WebSocket通信正常，支持终端输入输出实时传输"
+      status: "completed"
+    - criterion: "Token安全认证机制工作正常"
+      status: "completed"
+    - criterion: "前端xterm.js终端渲染正常，TUI程序无乱码"
+      status: "completed"
+    - criterion: "移动端虚拟键盘显示/隐藏正常，组合键操作正确"
+      status: "completed"
+    - criterion: "会话持久化：断连后进程不中断，重连可恢复"
+      status: "completed"
+    - criterion: "终端输出可导出为文本文件"
+      status: "completed"
+    - criterion: "交叉编译脚本可构建所有平台版本"
+      status: "completed"
+
+  technical_requirements:
+    - requirement: "使用github.com/gin-gonic/gin作为Web框架"
+      mandatory: true
+    - requirement: "使用github.com/gorilla/websocket处理WebSocket"
+      mandatory: true
+    - requirement: "使用github.com/creack/pty处理伪终端"
+      mandatory: true
+    - requirement: "前端使用xterm.js渲染终端"
+      mandatory: true
+    - requirement: "静态链接，生成单一可执行文件"
+      mandatory: true
+
+execution:
+  workflow:
+    - step: 1
+      name: "需求分析"
+      status: "completed"
+      assignee: "requirement-analyst"
+      started_at: "2026-04-21T10:10:00Z"
+      completed_at: "2026-04-21T10:30:00Z"
+      outputs:
+        - "ai/design_by_user_say.md"
+      notes: "需求规格说明书已完成，包含11个功能需求、4个非功能需求、4个技术风险"
+    - step: 2
+      name: "架构设计"
+      status: "completed"
+      assignee: "code-framework"
+      started_at: "2026-04-21T11:00:00Z"
+      completed_at: "2026-04-21T11:45:00Z"
+      outputs:
+        - "ai/dev/project.md"
+      notes: "架构设计完成，包含跨平台PTY方案(build tags+接口抽象)、会话持久化设计、WebSocket协议定义、HTTP API规范"
+    - step: 3
+      name: "后端功能开发"
+      status: "completed"
+      assignee: "code-builder"
+      started_at: "2026-04-21T12:00:00Z"
+      completed_at: "2026-04-21T14:00:00Z"
+      outputs:
+        - "go.mod"
+        - "go.sum"
+        - "main.go"
+        - "config.go"
+        - "auth.go"
+        - "session.go"
+        - "handler.go"
+        - "pty.go"
+        - "pty_unix.go"
+        - "pty_windows.go"
+        - "shell.go"
+        - "message.go"
+        - "static/index.html"
+        - "build.sh"
+        - "build.bat"
+      notes: "后端全部功能实现完成，Windows/Linux/macOS三平台交叉编译验证通过，go vet检查无错误"
+    - step: 4
+      name: "前端功能开发"
+      status: "completed"
+      assignee: "frontend-builder"
+      started_at: "2026-04-21T15:00:00Z"
+      completed_at: "2026-04-21T16:30:00Z"
+      outputs:
+        - "static/index.html"
+        - "static/css/style.css"
+        - "static/js/app.js"
+        - "static/js/terminal.js"
+        - "static/js/keyboard.js"
+        - "static/js/sidebar.js"
+        - "static/js/export.js"
+      notes: "前端全部功能实现完成，包含xterm.js终端渲染、Token认证、WebSocket通信(含自动重连)、移动端虚拟键盘、会话侧边栏、终端输出导出"
+    - step: 5
+      name: "构建与部署脚本"
+      status: "pending"
+      assignee: "dev-ops"
+      outputs: []
+      notes: null
+    - step: 6
+      name: "测试验证"
+      status: "completed"
+      assignee: "test-engineer"
+      started_at: "2026-04-21T17:00:00Z"
+      completed_at: "2026-04-21T18:00:00Z"
+      outputs:
+        - "ai/reports/test-report.md"
+      notes: "全面测试完成: 编译✅ go vet✅ 功能逻辑审查✅ 前端功能审查✅ 启动运行测试✅ 协议一致性✅。发现5个风险项(RISK-001~005)，0个阻断性Bug"
+    - step: 7
+      name: "代码审查"
+      status: "completed"
+      assignee: "code-review-qa"
+      started_at: "2026-04-21T18:30:00Z"
+      completed_at: "2026-04-21T19:00:00Z"
+      outputs:
+        - "ai/review/review-report.md"
+      notes: "代码审查完成，5个风险项全部修复，编译和go vet通过。额外发现2个低风险问题可后续优化"
+
+history:
+  - timestamp: "2026-04-21T10:00:00Z"
+    agent: "product-manager"
+    action: "created"
+    details: "任务创建，基于设计.txt文档"
+  - timestamp: "2026-04-21T10:10:00Z"
+    agent: "requirement-analyst"
+    action: "started"
+    details: "开始需求分析"
+  - timestamp: "2026-04-21T10:30:00Z"
+    agent: "requirement-analyst"
+    action: "step_completed"
+    details: "需求分析完成，输出 ai/design_by_user_say.md"
+  - timestamp: "2026-04-21T11:00:00Z"
+    agent: "code-framework"
+    action: "started"
+    details: "开始架构设计"
+  - timestamp: "2026-04-21T11:45:00Z"
+    agent: "code-framework"
+    action: "step_completed"
+    details: "架构设计完成，输出 ai/dev/project.md"
+  - timestamp: "2026-04-21T12:00:00Z"
+    agent: "code-builder"
+    action: "started"
+    details: "开始后端功能开发"
+  - timestamp: "2026-04-21T14:00:00Z"
+    agent: "code-builder"
+    action: "step_completed"
+    details: "后端功能开发完成，所有平台交叉编译验证通过"
+  - timestamp: "2026-04-21T15:00:00Z"
+    agent: "frontend-builder"
+    action: "started"
+    details: "开始前端功能开发"
+  - timestamp: "2026-04-21T18:30:00Z"
+    agent: "code-review-qa"
+    action: "started"
+    details: "开始代码审查"
+  - timestamp: "2026-04-21T19:00:00Z"
+    agent: "code-review-qa"
+    action: "step_completed"
+    details: "代码审查完成: 5个风险项全部修复(RISK-001~005)，编译✅ go vet✅，额外发现2个低风险问题。报告: ai/review/review-report.md"

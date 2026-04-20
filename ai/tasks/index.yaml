@@ -1,0 +1,20 @@
+version: "1.0"
+updated_at: "2026-04-21T19:00:00Z"
+updated_by: "code-review-qa"
+
+statistics:
+  total: 1
+  pending: 0
+  in_progress: 0
+  completed: 1
+  blocked: 0
+
+tasks:
+  - id: "TASK-001"
+    title: "跨平台Web终端远程控制系统 - 整体实现"
+    status: "completed"
+    priority: "P0"
+    assignee: "code-review-qa"
+    created_at: "2026-04-21T10:00:00Z"
+    completed_at: "2026-04-21T19:00:00Z"
+    file: "active/task-TASK-001.yaml"

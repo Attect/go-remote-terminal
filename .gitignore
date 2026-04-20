@@ -1,0 +1,16 @@
+# 构建产物
+*.exe
+go-remote-terminal-*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
