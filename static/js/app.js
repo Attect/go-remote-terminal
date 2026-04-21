@@ -39,7 +39,10 @@ const App = {
      * 显示Token输入弹窗
      */
     showTokenModal() {
-        document.getElementById('token-modal').style.display = 'flex';
+        // 重置弹窗状态
+        const modal = document.getElementById('token-modal');
+        modal.style.display = 'flex';
+        modal.style.visibility = 'visible';
         document.getElementById('token-input').value = '';
         document.getElementById('token-error').style.display = 'none';
 
@@ -56,9 +59,7 @@ const App = {
             });
         }
 
-        setTimeout(() => {
-            document.getElementById('token-input').focus();
-        }, 100);
+        document.getElementById('token-input').focus();
     },
 
     /**
@@ -66,6 +67,7 @@ const App = {
      */
     _submitToken() {
         const token = document.getElementById('token-input').value.trim();
+        
         if (!token) {
             document.getElementById('token-error').textContent = 'Token不能为空';
             document.getElementById('token-error').style.display = 'block';
@@ -76,17 +78,16 @@ const App = {
             document.getElementById('token-error').style.display = 'block';
             return;
         }
+        
         this.token = token;
         localStorage.setItem('terminal_token', token);
         
-        // 先隐藏token弹窗，确保用户能看到主界面
+        // 使用visibility隐藏，比display更可靠
         const tokenModal = document.getElementById('token-modal');
+        tokenModal.style.visibility = 'hidden';
         tokenModal.style.display = 'none';
         
-        // 使用setTimeout确保DOM更新后再继续
-        setTimeout(() => {
-            this.startApp();
-        }, 50);
+        this.startApp();
     },
 
     /**
@@ -372,12 +373,47 @@ const App = {
     },
 
     /**
-     * 停止心跳
+     * 启动应用主界面
      */
-    stopPing() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
+    async startApp() {
+        // 首次初始化UI（只执行一次）
+        if (!this._initialized) {
+            this._initialized = true;
+
+            // 显示主界面
+            document.getElementById('app').style.display = 'flex';
+
+            const container = document.getElementById('xterm-terminal');
+            TermMgr.init(container);
+
+            Keyboard.init();
+            Sidebar.init();
+
+            document.getElementById('btn-export').addEventListener('click', () => {
+                Export.exportOutput(TermMgr.term, this.currentSessionName);
+            });
+
+            document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
+                Keyboard.toggle();
+            });
+
+            document.getElementById('btn-reconnect').addEventListener('click', () => {
+                this.reconnectAttempts = 0;
+                this.connect(this.currentSessionId);
+            });
+        }
+
+        // 验证Token有效性并连接
+        try {
+            await this.apiRequest('GET', '/api/sessions');
+            // Token有效，建立WebSocket连接
+            this.connect();
+        } catch (e) {
+            // Token无效，清除并重新输入
+            localStorage.removeItem('terminal_token');
+            this.token = null;
+            this.showToast('Token验证失败，请重新输入', 'error');
+            this.showTokenModal();
         }
     },
 
