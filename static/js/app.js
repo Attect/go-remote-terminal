@@ -65,72 +65,42 @@ const App = {
     /**
      * 提交Token
      */
-    _submitToken() {
-        const token = document.getElementById('token-input').value.trim();
+_submitToken() {
+        const tokenInput = document.getElementById('token-input');
+        const token = tokenInput ? tokenInput.value.trim() : '';
+        
+        console.log('[App] _submitToken, token:', token, 'length:', token.length);
         
         if (!token) {
-            document.getElementById('token-error').textContent = 'Token不能为空';
-            document.getElementById('token-error').style.display = 'block';
+            const errEl = document.getElementById('token-error');
+            if (errEl) {
+                errEl.textContent = 'Token不能为空';
+                errEl.style.display = 'block';
+            }
             return;
         }
         if (token.length < 8) {
-            document.getElementById('token-error').textContent = 'Token长度不能少于8个字符';
-            document.getElementById('token-error').style.display = 'block';
+            const errEl = document.getElementById('token-error');
+            if (errEl) {
+                errEl.textContent = 'Token长度不能少于8个字符';
+                errEl.style.display = 'block';
+            }
             return;
         }
         
         this.token = token;
         localStorage.setItem('terminal_token', token);
         
-        // 使用visibility隐藏，比display更可靠
+        // 使用visibility隐藏比display更可靠
         const tokenModal = document.getElementById('token-modal');
-        tokenModal.style.visibility = 'hidden';
-        tokenModal.style.display = 'none';
+        if (tokenModal) {
+            console.log('[App] hiding modal');
+            tokenModal.style.visibility = 'hidden';
+            tokenModal.style.display = 'none';
+        }
         
+        console.log('[App] calling startApp');
         this.startApp();
-    },
-
-    /**
-     * 启动应用主界面
-     */
-    async startApp() {
-        // 首次初始化UI（只执行一次）
-        if (!this._initialized) {
-            this._initialized = true;
-
-            document.getElementById('app').style.display = 'flex';
-
-            const container = document.getElementById('xterm-terminal');
-            TermMgr.init(container);
-
-            Keyboard.init();
-            Sidebar.init();
-
-            document.getElementById('btn-export').addEventListener('click', () => {
-                Export.exportOutput(TermMgr.term, this.currentSessionName);
-            });
-
-            document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
-                Keyboard.toggle();
-            });
-
-            document.getElementById('btn-reconnect').addEventListener('click', () => {
-                this.reconnectAttempts = 0;
-                this.connect(this.currentSessionId);
-            });
-        }
-
-        // 验证Token有效性并连接
-        try {
-            await this.apiRequest('GET', '/api/sessions');
-            // Token有效，建立WebSocket连接（新标签页不传sessionId，让服务端创建新会话）
-            this.connect();
-        } catch (e) {
-            localStorage.removeItem('terminal_token');
-            this.token = null;
-            this.showToast('Token验证失败，请重新输入', 'error');
-            this.showTokenModal();
-        }
     },
 
     /**
