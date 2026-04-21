@@ -142,6 +142,14 @@ func (w *WSConn) Close() error {
 	return w.conn.Close()
 }
 
+// ==================== ConnInfo ====================
+
+// ConnInfo 记录每个WebSocket连接的信息
+type ConnInfo struct {
+	Rows uint16 // 终端行数
+	Cols uint16 // 终端列数
+}
+
 // ==================== Session ====================
 
 // SessionStatus 会话状态枚举
@@ -154,74 +162,136 @@ const (
 
 // Session 表示一个终端会话
 type Session struct {
-	ID        string             // 会话唯一标识，UUID格式
-	Name      string             // 会话显示名称
-	Pty       PtyProcess         // 关联的PTY进程
-	CreatedAt time.Time          // 创建时间
-	Status    SessionStatus      // 会话状态
-	mu        sync.Mutex         // 会话级别锁
-	outputBuf *RingBuffer        // 终端输出环形缓冲区
-	writerWS  *WSConn            // 当前写入者WebSocket连接
-	readerWS  []*WSConn          // 只读观察者WebSocket连接列表
-	cancelFn  context.CancelFunc // PTY输出读取goroutine取消函数
+	ID        string                // 会话唯一标识，UUID格式
+	Name      string                // 会话显示名称
+	Pty       PtyProcess            // 关联的PTY进程
+	CreatedAt time.Time             // 创建时间
+	Status    SessionStatus         // 会话状态
+	mu        sync.Mutex            // 会话级别锁
+	outputBuf *RingBuffer           // 终端输出环形缓冲区
+	conns     map[*WSConn]*ConnInfo // 所有连接的WebSocket及其终端尺寸
+	cancelFn  context.CancelFunc    // PTY输出读取goroutine取消函数
 }
 
 // newSession 创建新会话（内部方法）
-func newSession(id, name string, pty PtyProcess) *Session {
+func newSession(id, name string, ptyProc PtyProcess) *Session {
 	return &Session{
 		ID:        id,
 		Name:      name,
-		Pty:       pty,
+		Pty:       ptyProc,
 		CreatedAt: time.Now(),
 		Status:    SessionActive,
 		outputBuf: NewRingBuffer(defaultRingBufferSize),
+		conns:     make(map[*WSConn]*ConnInfo),
 	}
 }
 
-// AttachWriter 将WebSocket绑定到会话的写入端
-// 同一会话同一时刻只允许一个写入者
-func (s *Session) AttachWriter(ws *WSConn) error {
+// AddConn 添加WebSocket连接到会话
+// 返回当前PTY尺寸，用于通知新连接适配
+func (s *Session) AddConn(ws *WSConn, rows, cols uint16) (ptyRows, ptyCols uint16) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.writerWS != nil {
-		return ErrSessionBusy
+	s.conns[ws] = &ConnInfo{Rows: rows, Cols: cols}
+
+	// 如果只有一个连接，直接将PTY调整到该连接的尺寸
+	if len(s.conns) == 1 {
+		if s.Pty != nil {
+			_ = s.Pty.Resize(rows, cols)
+		}
+		return rows, cols
 	}
 
-	if s.Status == SessionExited {
-		return ErrSessionExpired
+	// 多个连接时，计算最小尺寸
+	minRows, minCols := s.calcMinSizeLocked()
+	if s.Pty != nil {
+		_ = s.Pty.Resize(minRows, minCols)
+	}
+	return minRows, minCols
+}
+
+// RemoveConn 移除WebSocket连接
+// 返回是否需要通知其他连接（PTY尺寸可能变更）
+func (s *Session) RemoveConn(ws *WSConn) (newPtyRows, newPtyCols uint16, shouldNotify bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.conns, ws)
+
+	if len(s.conns) == 0 {
+		return 0, 0, false
 	}
 
-	s.writerWS = ws
-	return nil
-}
-
-// DetachWriter 解除WebSocket的写入绑定
-func (s *Session) DetachWriter(ws *WSConn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.writerWS == ws {
-		s.writerWS = nil
+	// 连接移除后，重新计算最小尺寸
+	minRows, minCols := s.calcMinSizeLocked()
+	if s.Pty != nil {
+		_ = s.Pty.Resize(minRows, minCols)
 	}
+	return minRows, minCols, true
 }
 
-// AttachReader 添加只读观察者
-func (s *Session) AttachReader(ws *WSConn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.readerWS = append(s.readerWS, ws)
-}
-
-// DetachReader 移除只读观察者
-func (s *Session) DetachReader(ws *WSConn) {
+// UpdateConnSize 更新指定连接的终端尺寸
+// 返回PTY是否需要调整尺寸，以及新的PTY尺寸
+func (s *Session) UpdateConnSize(ws *WSConn, rows, cols uint16) (newPtyRows, newPtyCols uint16, ptyChanged bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for i, reader := range s.readerWS {
-		if reader == ws {
-			s.readerWS = append(s.readerWS[:i], s.readerWS[i+1:]...)
-			break
+	info, ok := s.conns[ws]
+	if !ok {
+		// 连接不在会话中，先添加
+		s.conns[ws] = &ConnInfo{Rows: rows, Cols: cols}
+	} else {
+		info.Rows = rows
+		info.Cols = cols
+	}
+
+	// 重新计算最小尺寸
+	minRows, minCols := s.calcMinSizeLocked()
+
+	// 检查PTY尺寸是否需要变更
+	var curRows, curCols uint16 = 24, 80 // 默认值
+	if len(s.conns) > 0 {
+		curRows = minRows
+		curCols = minCols
+	}
+
+	if s.Pty != nil {
+		_ = s.Pty.Resize(minRows, minCols)
+	}
+
+	return curRows, curCols, true
+}
+
+// calcMinSizeLocked 计算所有连接中的最小终端尺寸（调用方需持有锁）
+func (s *Session) calcMinSizeLocked() (minRows, minCols uint16) {
+	minRows = 0
+	minCols = 0
+	for _, info := range s.conns {
+		if minRows == 0 || info.Rows < minRows {
+			minRows = info.Rows
+		}
+		if minCols == 0 || info.Cols < minCols {
+			minCols = info.Cols
+		}
+	}
+	// 兜底：确保最小值合理
+	if minRows == 0 {
+		minRows = 24
+	}
+	if minCols == 0 {
+		minCols = 80
+	}
+	return
+}
+
+// BroadcastMessage 向所有连接广播消息
+func (s *Session) BroadcastMessage(msg WSMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for ws := range s.conns {
+		if err := ws.WriteJSON(msg); err != nil {
+			log.Printf("[Session %s] broadcast to WS failed: %v", s.ID, err)
 		}
 	}
 }
@@ -241,15 +311,9 @@ func (s *Session) WriteOutput(data []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.writerWS != nil {
-		if err := s.writerWS.WriteJSON(msg); err != nil {
-			log.Printf("[Session %s] write to writer WS failed: %v", s.ID, err)
-		}
-	}
-
-	for _, reader := range s.readerWS {
-		if err := reader.WriteJSON(msg); err != nil {
-			log.Printf("[Session %s] write to reader WS failed: %v", s.ID, err)
+	for ws := range s.conns {
+		if err := ws.WriteJSON(msg); err != nil {
+			log.Printf("[Session %s] write to WS failed: %v", s.ID, err)
 		}
 	}
 }
@@ -262,16 +326,7 @@ func (s *Session) GetOutput() []byte {
 // broadcastError 向所有连接广播错误消息
 func (s *Session) broadcastError(code, message string) {
 	msg := NewErrorMessage(code, message)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.writerWS != nil {
-		_ = s.writerWS.WriteJSON(msg)
-	}
-	for _, reader := range s.readerWS {
-		_ = reader.WriteJSON(msg)
-	}
+	s.BroadcastMessage(msg)
 }
 
 // startOutputReader 启动PTY输出读取goroutine
@@ -304,6 +359,13 @@ func (s *Session) startOutputReader(ctx context.Context) {
 	}
 }
 
+// ConnCount 返回当前连接数
+func (s *Session) ConnCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.conns)
+}
+
 // ==================== 错误定义 ====================
 
 type SessionError struct {
@@ -317,7 +379,6 @@ func (e *SessionError) Error() string {
 
 var (
 	ErrSessionNotFound = &SessionError{Code: "SESSION_NOT_FOUND", Message: "session not found"}
-	ErrSessionBusy     = &SessionError{Code: "SESSION_BUSY", Message: "session already has a writer"}
 	ErrSessionExpired  = &SessionError{Code: "SESSION_EXPIRED", Message: "session process has exited"}
 	ErrInvalidName     = &SessionError{Code: "INVALID_SESSION_NAME", Message: "invalid session name"}
 )
@@ -436,14 +497,10 @@ func (p *SessionPool) Close(id string) error {
 
 	// 关闭所有WebSocket连接
 	session.mu.Lock()
-	if session.writerWS != nil {
-		_ = session.writerWS.Close()
-		session.writerWS = nil
+	for ws := range session.conns {
+		_ = ws.Close()
 	}
-	for _, reader := range session.readerWS {
-		_ = reader.Close()
-	}
-	session.readerWS = nil
+	session.conns = make(map[*WSConn]*ConnInfo)
 	session.mu.Unlock()
 
 	// 从池中移除
@@ -488,14 +545,10 @@ func (p *SessionPool) Cleanup() {
 			}
 			// 关闭所有WebSocket
 			session.mu.Lock()
-			if session.writerWS != nil {
-				_ = session.writerWS.Close()
-				session.writerWS = nil
+			for ws := range session.conns {
+				_ = ws.Close()
 			}
-			for _, reader := range session.readerWS {
-				_ = reader.Close()
-			}
-			session.readerWS = nil
+			session.conns = make(map[*WSConn]*ConnInfo)
 			session.mu.Unlock()
 
 			p.sessions.Delete(key)

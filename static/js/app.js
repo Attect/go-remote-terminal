@@ -139,7 +139,7 @@ const App = {
             this.reconnectAttempts = 0;
             this.updateConnectionStatus('connected');
 
-            // 发送当前终端尺寸
+            // 发送当前终端尺寸（这会触发服务端注册连接）
             this.sendResize(TermMgr.getRows(), TermMgr.getCols());
 
             // 启动心跳
@@ -192,6 +192,10 @@ const App = {
                 this.handleError(msg);
                 break;
 
+            case 'pty_resize':
+                this.handlePtyResize(msg);
+                break;
+
             case 'pong':
                 // 心跳响应，无需处理
                 break;
@@ -230,6 +234,16 @@ const App = {
     },
 
     /**
+     * 处理PTY尺寸变更通知
+     * 多连接场景下，服务端协调所有连接尺寸取最小值后通知客户端
+     */
+    handlePtyResize(msg) {
+        if (msg.rows > 0 && msg.cols > 0) {
+            TermMgr.resizeToPtySize(msg.rows, msg.cols);
+        }
+    },
+
+    /**
      * 处理错误消息
      */
     handleError(msg) {
@@ -243,8 +257,6 @@ const App = {
             this.showToast('会话不存在或已过期，将创建新会话', 'error');
             this.currentSessionId = null;
             setTimeout(() => this.connect(), 1000);
-        } else if (msg.code === 'SESSION_BUSY') {
-            this.showToast('会话已有其他连接', 'error');
         } else if (msg.code === 'SESSION_CREATE_FAILED') {
             this.showToast('会话创建失败: ' + (msg.message || ''), 'error');
         } else {

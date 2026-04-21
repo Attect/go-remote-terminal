@@ -18,6 +18,7 @@ const (
 	MsgOutput      MessageType = "output"       // 终端输出数据
 	MsgError       MessageType = "error"        // 错误信息
 	MsgSessionInfo MessageType = "session_info" // 会话元信息
+	MsgPtyResize   MessageType = "pty_resize"   // PTY尺寸变更通知（服务端→客户端）
 
 	// 双向
 	MsgPing MessageType = "ping" // 心跳检测
@@ -87,6 +88,16 @@ func NewSessionInfoMessage(s *Session) WSMessage {
 // NewPongMessage 创建pong消息
 func NewPongMessage() WSMessage {
 	return WSMessage{Type: MsgPong}
+}
+
+// NewPtyResizeMessage 创建PTY尺寸变更通知消息（服务端→客户端）
+// 当PTY尺寸因多连接协调而变更时，通知所有客户端调整xterm.js尺寸
+func NewPtyResizeMessage(rows, cols uint16) WSMessage {
+	return WSMessage{
+		Type: MsgPtyResize,
+		Rows: rows,
+		Cols: cols,
+	}
 }
 
 // ParseMessage 解析WebSocket消息

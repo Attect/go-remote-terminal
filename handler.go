@@ -298,17 +298,6 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		}
 		session.mu.Unlock()
 
-		// 尝试绑定写入端
-		if err := session.AttachWriter(ws); err != nil {
-			_ = ws.WriteJSON(NewErrorMessage("SESSION_BUSY", "session already has a writer"))
-			_ = ws.Close()
-			return
-		}
-
-		// 发送缓冲区内容（重连回显）
-		if output := session.GetOutput(); len(output) > 0 {
-			_ = ws.WriteJSON(NewOutputMessage(output))
-		}
 	} else {
 		// 新建模式：创建新会话
 		session, err = h.pool.Create("", "")
@@ -317,17 +306,18 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 			_ = ws.Close()
 			return
 		}
-
-		// 绑定写入端
-		if err := session.AttachWriter(ws); err != nil {
-			_ = ws.WriteJSON(NewErrorMessage("SESSION_BUSY", "session already has a writer"))
-			_ = ws.Close()
-			return
-		}
 	}
 
 	// 发送会话信息
 	_ = ws.WriteJSON(NewSessionInfoMessage(session))
+
+	// 发送缓冲区内容（重连回显）
+	if output := session.GetOutput(); len(output) > 0 {
+		_ = ws.WriteJSON(NewOutputMessage(output))
+	}
+
+	// 注意：连接的尺寸在收到第一条resize消息时注册，
+	// 初始先用默认值，前端ws.onopen会立即发送resize
 
 	log.Printf("[WebSocket] connected to session %s", session.ID)
 
@@ -337,19 +327,26 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 
 // handleWSMessages 处理WebSocket消息循环
 func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
+	// 连接注册标记：收到第一条resize后注册到session
+	registered := false
+
 	defer func() {
-		// 断开时解除绑定
-		session.DetachWriter(ws)
+		// 断开时从会话移除连接
+		if registered {
+			newPtyRows, newPtyCols, shouldNotify := session.RemoveConn(ws)
+			if shouldNotify {
+				// 通知其他连接PTY尺寸变更
+				session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
+			}
+		}
 		_ = ws.Close()
 		log.Printf("[WebSocket] disconnected from session %s", session.ID)
 	}()
 
 	// 设置读取超时和ping/pong处理
-	// 60秒内无消息则认为连接异常，防止半开连接长期占用资源
 	const readTimeout = 60 * time.Second
 	ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
 	ws.conn.SetPongHandler(func(appData string) error {
-		// 收到pong响应，刷新读取超时
 		ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
 		return nil
 	})
@@ -375,10 +372,9 @@ func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
 		case MsgInput:
 			h.handleInput(ws, session, msg)
 		case MsgResize:
-			h.handleResize(ws, session, msg)
+			registered = h.handleResize(ws, session, msg, registered)
 		case MsgPing:
 			_ = ws.WriteJSON(NewPongMessage())
-			// 收到ping也算连接活跃，刷新读取超时
 			ws.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		default:
 			log.Printf("[WebSocket] unknown message type %q from session %s", msg.Type, session.ID)
@@ -402,16 +398,31 @@ func (h *Handler) handleInput(ws *WSConn, session *Session, msg *WSMessage) {
 }
 
 // handleResize 处理终端尺寸变更消息
-func (h *Handler) handleResize(ws *WSConn, session *Session, msg *WSMessage) {
+// 返回是否已注册到会话
+func (h *Handler) handleResize(ws *WSConn, session *Session, msg *WSMessage, registered bool) bool {
 	rows, cols, err := msg.GetResize()
 	if err != nil {
 		log.Printf("[WebSocket] invalid resize message from session %s: %v", session.ID, err)
-		return
+		return registered
 	}
 
-	if session.Pty != nil {
-		if err := session.Pty.Resize(rows, cols); err != nil {
-			log.Printf("[WebSocket] failed to resize PTY for session %s: %v", session.ID, err)
+	if !registered {
+		// 第一次收到resize，注册连接到会话
+		newPtyRows, newPtyCols := session.AddConn(ws, rows, cols)
+		registered = true
+
+		// 通知该连接当前PTY尺寸（可能比其窗口更小）
+		if newPtyRows != rows || newPtyCols != cols {
+			_ = ws.WriteJSON(NewPtyResizeMessage(newPtyRows, newPtyCols))
+		}
+	} else {
+		// 更新连接尺寸
+		newPtyRows, newPtyCols, ptyChanged := session.UpdateConnSize(ws, rows, cols)
+		if ptyChanged {
+			// PTY尺寸变更，通知所有连接
+			session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
 		}
 	}
+
+	return registered
 }

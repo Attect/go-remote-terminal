@@ -13,6 +13,13 @@ const TermMgr = {
     term: null,        // xterm.js实例
     fitAddon: null,    // fit插件实例
 
+    // resize相关状态
+    _lastResizeKey: '',       // 上次resize的尺寸key，避免重复发送
+    _resizeTimer: null,       // debounce定时器
+    _serverResizeInProgress: false, // 服务端resize进行中标记，防止反馈循环
+    _resizeHandler: null,     // window resize事件处理器
+    _resizeObserver: null,    // ResizeObserver实例
+
     /**
      * 初始化终端
      * @param {HTMLElement} container - 终端容器DOM元素
@@ -53,7 +60,7 @@ const TermMgr = {
             },
             allowTransparency: false,
             scrollback: 5000,
-            convertEol: true,
+            convertEol: false,
             lineHeight: 1.15,
         });
 
@@ -64,7 +71,7 @@ const TermMgr = {
         // 打开终端
         this.term.open(container);
 
-        // 初始适配
+        // 初始适配（延迟确保容器已有尺寸）
         requestAnimationFrame(() => {
             this.fit();
         });
@@ -76,9 +83,12 @@ const TermMgr = {
             }
         });
 
-        // 监听resize事件（仅向服务端发送，不在前端触发resize以避免循环）
+        // 监听resize事件（仅向服务端发送）
         this._lastResizeKey = '';
         this.term.onResize(({ cols, rows }) => {
+            // 如果是服务端触发的resize，不回发给服务端（防止反馈循环）
+            if (this._serverResizeInProgress) return;
+
             const key = `${cols}x${rows}`;
             if (key !== this._lastResizeKey) {
                 this._lastResizeKey = key;
@@ -88,21 +98,38 @@ const TermMgr = {
             }
         });
 
-        // 窗口resize时自动适配
+        // 窗口resize时自动适配（带debounce）
         this._resizeHandler = () => {
-            this.fit();
+            this.debouncedFit();
         };
         window.addEventListener('resize', this._resizeHandler);
 
-        // 监听容器尺寸变化(侧边栏折叠等)
+        // 监听容器尺寸变化(侧边栏折叠等)，带debounce
         if (typeof ResizeObserver !== 'undefined') {
             this._resizeObserver = new ResizeObserver(() => {
-                this.fit();
+                this.debouncedFit();
             });
-            this._resizeObserver.observe(container.parentElement || container);
+            // 观察terminal-wrapper（终端的直接父容器）
+            const wrapper = container.parentElement;
+            if (wrapper) {
+                this._resizeObserver.observe(wrapper);
+            }
         }
 
         return this.term;
+    },
+
+    /**
+     * 带debounce的fit调用
+     * 避免频繁resize导致过多计算和通信
+     */
+    debouncedFit() {
+        if (this._resizeTimer) {
+            clearTimeout(this._resizeTimer);
+        }
+        this._resizeTimer = setTimeout(() => {
+            this.fit();
+        }, 100);
     },
 
     /**
@@ -116,6 +143,26 @@ const TermMgr = {
         } catch (e) {
             // ignore fit errors during transitions
         }
+    },
+
+    /**
+     * 服务端通知PTY尺寸变更，调整xterm.js匹配
+     * 多连接场景下，PTY尺寸取所有连接的最小值
+     * @param {number} rows - PTY行数
+     * @param {number} cols - PTY列数
+     */
+    resizeToPtySize(rows, cols) {
+        if (!this.term) return;
+
+        // 设置标记，防止onResize回发给服务端
+        this._serverResizeInProgress = true;
+        try {
+            this.term.resize(cols, rows);
+            this._lastResizeKey = `${cols}x${rows}`;
+        } catch (e) {
+            // ignore resize errors
+        }
+        this._serverResizeInProgress = false;
     },
 
     /**
@@ -164,6 +211,10 @@ const TermMgr = {
      * 销毁终端实例
      */
     dispose() {
+        if (this._resizeTimer) {
+            clearTimeout(this._resizeTimer);
+            this._resizeTimer = null;
+        }
         if (this._resizeHandler) {
             window.removeEventListener('resize', this._resizeHandler);
             this._resizeHandler = null;

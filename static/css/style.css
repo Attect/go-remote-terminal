@@ -439,6 +439,12 @@ ul {
     height: 100%;
 }
 
+/* 终端容器必须有明确尺寸，fit插件才能正确计算 */
+#xterm-terminal {
+    width: 100%;
+    height: 100%;
+}
+
 .terminal-wrapper .xterm-viewport {
     overflow-y: auto !important;
 }

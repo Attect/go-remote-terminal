@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -29,6 +30,11 @@ func (p *UnixPtyProcess) Start(cmd string, args []string, rows, cols uint16) err
 	p.cmd = exec.Command(cmd, args...)
 	p.cmd.Env = os.Environ()
 
+	// 确保UTF-8 locale已设置，解决中文显示问题
+	if !envHasUTF8Locale(p.cmd.Env) {
+		p.cmd.Env = append(p.cmd.Env, "LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8")
+	}
+
 	ptmx, err := pty.StartWithSize(p.cmd, &pty.Winsize{
 		Rows: rows,
 		Cols: cols,
@@ -42,6 +48,18 @@ func (p *UnixPtyProcess) Start(cmd string, args []string, rows, cols uint16) err
 	p.running = true
 	p.mu.Unlock()
 	return nil
+}
+
+// envHasUTF8Locale 检查环境变量中是否已设置UTF-8 locale
+func envHasUTF8Locale(env []string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, "LANG=") || strings.HasPrefix(e, "LC_ALL=") {
+			if strings.Contains(strings.ToUpper(e), "UTF") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Read 从PTY读取输出数据
