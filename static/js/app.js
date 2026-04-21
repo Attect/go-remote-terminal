@@ -65,11 +65,9 @@ const App = {
     /**
      * 提交Token
      */
-_submitToken() {
+    _submitToken() {
         const tokenInput = document.getElementById('token-input');
         const token = tokenInput ? tokenInput.value.trim() : '';
-        
-        console.log('[App] _submitToken, token:', token, 'length:', token.length);
         
         if (!token) {
             const errEl = document.getElementById('token-error');
@@ -91,15 +89,12 @@ _submitToken() {
         this.token = token;
         localStorage.setItem('terminal_token', token);
         
-        // 使用visibility隐藏比display更可靠
         const tokenModal = document.getElementById('token-modal');
         if (tokenModal) {
-            console.log('[App] hiding modal');
             tokenModal.style.visibility = 'hidden';
             tokenModal.style.display = 'none';
         }
         
-        console.log('[App] calling startApp');
         this.startApp();
     },
 
@@ -340,6 +335,16 @@ _submitToken() {
                 this.ws.send(JSON.stringify({ type: 'ping' }));
             }
         }, 30000);
+    },
+
+    /**
+     * 停止心跳
+     */
+    stopPing() {
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
     },
 
     /**
