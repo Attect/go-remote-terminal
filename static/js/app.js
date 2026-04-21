@@ -134,11 +134,13 @@ const App = {
     connect(sessionId) {
         // 防止并发连接
         if (this._connecting) return;
+        
+        // 先标记为手动关闭，防止关闭旧连接时触发onclose中的自动重连
+        this.manualClose = true;
         this._connecting = true;
 
         // 关闭旧连接
         if (this.ws) {
-            this.manualClose = true;
             this.ws.close();
             this.ws = null;
         }

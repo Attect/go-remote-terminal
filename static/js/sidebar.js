@@ -195,6 +195,7 @@ const Sidebar = {
 
         // 连接到目标会话（带sessionId，服务端会加入已有会话并回显缓冲区）
         App.currentSessionId = sessionId;
+        App.manualClose = true;  // 防止切换触发自动重连
         App.connect(sessionId);
 
         // 移动端自动收起侧边栏
@@ -221,7 +222,9 @@ const Sidebar = {
                 }
                 // 连接到新会话（带sessionId，服务端会加入该会话并回显）
                 App.currentSessionId = data.data.id;
+                App.manualClose = true;  // 防止创建触发自动重连
                 App.connect(data.data.id);
+                this.refreshSessions();  // 刷新侧边栏显示新会话
                 App.showToast('新会话已创建', 'success');
             }
         } catch (e) {
@@ -314,6 +317,7 @@ const Sidebar = {
                 const remaining = this.sessions.filter(s => s.id !== sessionId);
                 if (remaining.length > 0) {
                     App.currentSessionId = remaining[0].id;
+                    App.manualClose = true;  // 防止切换触发自动重连
                     App.connect(remaining[0].id);
                 } else {
                     // 无活跃会话，自动创建新的
