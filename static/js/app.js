@@ -234,12 +234,18 @@ const App = {
 
     /**
      * 处理终端输出消息
+     * Base64解码后转为Uint8Array传给xterm.js，
+     * xterm.js内部有完善的UTF-8解析器，能正确处理多字节字符（如中文）
      */
     handleOutput(msg) {
         if (msg.data) {
             try {
-                const decoded = atob(msg.data);
-                TermMgr.write(decoded);
+                const binaryStr = atob(msg.data);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) {
+                    bytes[i] = binaryStr.charCodeAt(i);
+                }
+                TermMgr.write(bytes);
             } catch (e) {
                 console.error('[App] failed to decode output data:', e);
             }

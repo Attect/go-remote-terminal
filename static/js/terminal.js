@@ -167,7 +167,10 @@ const TermMgr = {
 
     /**
      * 写入输出数据到终端
-     * @param {string} data - 输出数据（Base64解码后的原始字符串）
+     * 支持string和Uint8Array两种类型：
+     * - Uint8Array: 来自PTY的原始UTF-8字节，由xterm.js内部UTF-8解析器正确解码
+     * - string: 直接写入（如重连回显等场景）
+     * @param {string|Uint8Array} data - 输出数据
      */
     write(data) {
         if (this.term) {
