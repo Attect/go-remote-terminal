@@ -1,6 +1,12 @@
 /**
  * app.js - 主控制器模块
  * 负责全局状态管理、WebSocket连接、消息路由、模块协调
+ *
+ * 多客户端设计：
+ * - 每个浏览器标签页是独立的App实例
+ * - 新标签页默认创建新会话，通过sidebar可切换到已有会话
+ * - 重连时携带currentSessionId，复用已有会话而非创建新的
+ * - 会话不存在时才创建新会话
  */
 const App = {
     ws: null,                   // WebSocket连接实例
@@ -12,14 +18,14 @@ const App = {
     reconnectTimer: null,       // 重连定时器
     manualClose: false,         // 是否主动关闭（不触发自动重连）
     pingInterval: null,         // 心跳定时器
-    _initialized: false,        // UI是否已初始化（防止重复初始化）
-    _tokenSubmitBound: false,   // Token提交事件是否已绑定（防止重复绑定）
+    _initialized: false,        // UI是否已初始化
+    _tokenSubmitBound: false,   // Token提交事件是否已绑定
+    _connecting: false,         // 是否正在连接中（防止并发连接）
 
     /**
      * 初始化应用
      */
     init() {
-        // 检查Token
         const savedToken = localStorage.getItem('terminal_token');
         if (savedToken) {
             this.token = savedToken;
@@ -37,7 +43,6 @@ const App = {
         document.getElementById('token-input').value = '';
         document.getElementById('token-error').style.display = 'none';
 
-        // 避免重复绑定事件
         if (!this._tokenSubmitBound) {
             this._tokenSubmitBound = true;
 
@@ -51,7 +56,6 @@ const App = {
             });
         }
 
-        // 延迟聚焦，确保弹窗已渲染
         setTimeout(() => {
             document.getElementById('token-input').focus();
         }, 100);
@@ -86,30 +90,22 @@ const App = {
         if (!this._initialized) {
             this._initialized = true;
 
-            // 显示主界面
             document.getElementById('app').style.display = 'flex';
 
-            // 初始化终端
             const container = document.getElementById('xterm-terminal');
             TermMgr.init(container);
 
-            // 初始化虚拟键盘
             Keyboard.init();
-
-            // 初始化侧边栏
             Sidebar.init();
 
-            // 绑定导出按钮
             document.getElementById('btn-export').addEventListener('click', () => {
                 Export.exportOutput(TermMgr.term, this.currentSessionName);
             });
 
-            // 绑定虚拟键盘切换按钮
             document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
                 Keyboard.toggle();
             });
 
-            // 绑定重连按钮
             document.getElementById('btn-reconnect').addEventListener('click', () => {
                 this.reconnectAttempts = 0;
                 this.connect(this.currentSessionId);
@@ -119,10 +115,9 @@ const App = {
         // 验证Token有效性并连接
         try {
             await this.apiRequest('GET', '/api/sessions');
-            // Token有效，建立WebSocket连接
+            // Token有效，建立WebSocket连接（新标签页不传sessionId，让服务端创建新会话）
             this.connect();
         } catch (e) {
-            // Token无效，清除并重新输入
             localStorage.removeItem('terminal_token');
             this.token = null;
             this.showToast('Token验证失败，请重新输入', 'error');
@@ -132,9 +127,16 @@ const App = {
 
     /**
      * 建立WebSocket连接
-     * @param {string} sessionId - 会话ID（可选，用于重连）
+     * @param {string} sessionId - 会话ID（可选）
+     *   - 不传：让服务端创建新会话（新标签页首次连接）
+     *   - 传入：加入/重连已有会话（切换会话、断线重连）
      */
     connect(sessionId) {
+        // 防止并发连接
+        if (this._connecting) return;
+        this._connecting = true;
+
+        // 关闭旧连接
         if (this.ws) {
             this.manualClose = true;
             this.ws.close();
@@ -156,17 +158,19 @@ const App = {
             this.ws = new WebSocket(url);
         } catch (e) {
             console.error('[App] WebSocket creation failed:', e);
+            this._connecting = false;
             this.updateConnectionStatus('disconnected');
             this.scheduleReconnect();
             return;
         }
 
         this.ws.onopen = () => {
-            console.log('[App] WebSocket connected');
+            this._connecting = false;
+            console.log('[App] WebSocket connected, sessionId=' + (sessionId || 'new'));
             this.reconnectAttempts = 0;
             this.updateConnectionStatus('connected');
 
-            // 发送当前终端尺寸（这会触发服务端注册连接）
+            // 发送当前终端尺寸
             this.sendResize(TermMgr.getRows(), TermMgr.getCols());
 
             // 启动心跳
@@ -186,6 +190,7 @@ const App = {
         };
 
         this.ws.onclose = (event) => {
+            this._connecting = false;
             console.log('[App] WebSocket closed:', event.code, event.reason);
             this.stopPing();
             this.updateConnectionStatus('disconnected');
@@ -196,6 +201,7 @@ const App = {
         };
 
         this.ws.onerror = (event) => {
+            this._connecting = false;
             console.error('[App] WebSocket error:', event);
             this.updateConnectionStatus('disconnected');
         };
@@ -203,30 +209,23 @@ const App = {
 
     /**
      * 处理接收到的WebSocket消息
-     * @param {object} msg - 解析后的消息对象
      */
     handleMessage(msg) {
         switch (msg.type) {
             case 'output':
                 this.handleOutput(msg);
                 break;
-
             case 'session_info':
                 this.handleSessionInfo(msg);
                 break;
-
             case 'error':
                 this.handleError(msg);
                 break;
-
             case 'pty_resize':
                 this.handlePtyResize(msg);
                 break;
-
             case 'pong':
-                // 心跳响应，无需处理
                 break;
-
             default:
                 console.log('[App] unknown message type:', msg.type);
         }
@@ -254,21 +253,19 @@ const App = {
 
     /**
      * 处理会话信息消息
+     * 收到session_info表示服务端已成功建立/找到会话
      */
     handleSessionInfo(msg) {
         if (msg.id) {
             this.currentSessionId = msg.id;
             this.currentSessionName = msg.name || '';
             this.updateTitle(this.currentSessionName);
-
-            // 更新侧边栏高亮
             Sidebar.refreshSessions();
         }
     },
 
     /**
      * 处理PTY尺寸变更通知
-     * 多连接场景下，服务端协调所有连接尺寸取最小值后通知客户端
      */
     handlePtyResize(msg) {
         if (msg.rows > 0 && msg.cols > 0) {
@@ -278,17 +275,26 @@ const App = {
 
     /**
      * 处理错误消息
+     * 关键：SESSION_NOT_FOUND/SESSION_EXPIRED时重连到同session而非创建新的
      */
     handleError(msg) {
         console.error('[App] server error:', msg.code, msg.message);
 
         if (msg.code === 'SESSION_EXITED') {
             this.showToast('Shell进程已退出', 'error');
-            // 刷新会话列表
             Sidebar.refreshSessions();
         } else if (msg.code === 'SESSION_NOT_FOUND' || msg.code === 'SESSION_EXPIRED') {
+            // 会话已不存在，必须清空sessionId后创建新会话
             this.showToast('会话不存在或已过期，将创建新会话', 'error');
             this.currentSessionId = null;
+            // 关闭当前连接，让scheduleReconnect创建新会话
+            if (this.ws) {
+                this.manualClose = true;
+                this.ws.close();
+                this.ws = null;
+            }
+            // 不带sessionId重连，服务端会创建新会话
+            this.reconnectAttempts = 0;
             setTimeout(() => this.connect(), 1000);
         } else if (msg.code === 'SESSION_CREATE_FAILED') {
             this.showToast('会话创建失败: ' + (msg.message || ''), 'error');
@@ -299,18 +305,13 @@ const App = {
 
     /**
      * 发送终端输入数据
-     * @param {string} data - 输入数据（原始字符串）
      */
     sendInput(data) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
         try {
             const encoded = btoa(unescape(encodeURIComponent(data)));
-            const msg = {
-                type: 'input',
-                data: encoded
-            };
-            this.ws.send(JSON.stringify(msg));
+            this.ws.send(JSON.stringify({ type: 'input', data: encoded }));
         } catch (e) {
             console.error('[App] failed to send input:', e);
         }
@@ -318,23 +319,17 @@ const App = {
 
     /**
      * 发送终端resize消息
-     * @param {number} rows - 行数
-     * @param {number} cols - 列数
      */
     sendResize(rows, cols) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (rows <= 0 || cols <= 0) return;
 
-        const msg = {
-            type: 'resize',
-            rows: rows,
-            cols: cols
-        };
-        this.ws.send(JSON.stringify(msg));
+        this.ws.send(JSON.stringify({ type: 'resize', rows: rows, cols: cols }));
     },
 
     /**
      * 自动重连（指数退避）
+     * 重连时携带currentSessionId，复用已有会话
      */
     scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -349,6 +344,7 @@ const App = {
         this.updateConnectionStatus('connecting');
         this.showToast(`正在重连... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`, 'error');
 
+        // 携带currentSessionId重连，复用已有会话而非创建新的
         this.reconnectTimer = setTimeout(() => {
             this.connect(this.currentSessionId);
         }, delay);
@@ -363,7 +359,7 @@ const App = {
             if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                 this.ws.send(JSON.stringify({ type: 'ping' }));
             }
-        }, 30000); // 每30秒发送一次心跳
+        }, 30000);
     },
 
     /**
@@ -378,7 +374,6 @@ const App = {
 
     /**
      * 更新连接状态UI
-     * @param {string} status - 'connected' | 'connecting' | 'disconnected' | 'failed'
      */
     updateConnectionStatus(status) {
         const el = document.getElementById('connection-status');
@@ -404,7 +399,6 @@ const App = {
 
     /**
      * 更新标题栏
-     * @param {string} name - 会话名称
      */
     updateTitle(name) {
         this.currentSessionName = name || '';
@@ -416,10 +410,6 @@ const App = {
 
     /**
      * HTTP API请求封装
-     * @param {string} method - HTTP方法
-     * @param {string} path - API路径
-     * @param {object} body - 请求体（可选）
-     * @returns {Promise<object>} 响应数据
      */
     async apiRequest(method, path, body) {
         const headers = {
@@ -437,7 +427,6 @@ const App = {
 
         if (data.code !== 0) {
             if (data.code === 40100) {
-                // Token无效，要求重新输入
                 localStorage.removeItem('terminal_token');
                 this.token = null;
                 this.showTokenModal();
@@ -450,11 +439,8 @@ const App = {
 
     /**
      * 显示Toast通知
-     * @param {string} message - 通知消息
-     * @param {string} type - 'success' | 'error' | ''
      */
     showToast(message, type) {
-        // 移除已有toast
         document.querySelectorAll('.toast').forEach(t => t.remove());
 
         const toast = document.createElement('div');

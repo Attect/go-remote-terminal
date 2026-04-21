@@ -285,11 +285,16 @@ func (s *Session) calcMinSizeLocked() (minRows, minCols uint16) {
 }
 
 // BroadcastMessage 向所有连接广播消息
+// 先在锁内收集连接列表，再在锁外逐个发送，避免持锁写WS导致阻塞
 func (s *Session) BroadcastMessage(msg WSMessage) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	conns := make([]*WSConn, 0, len(s.conns))
 	for ws := range s.conns {
+		conns = append(conns, ws)
+	}
+	s.mu.Unlock()
+
+	for _, ws := range conns {
 		if err := ws.WriteJSON(msg); err != nil {
 			log.Printf("[Session %s] broadcast to WS failed: %v", s.ID, err)
 		}
@@ -305,13 +310,18 @@ func (s *Session) WriteOutput(data []byte) {
 	// 写入环形缓冲区
 	s.outputBuf.Write(data)
 
-	// 广播到所有WebSocket连接
+	// 构建消息
 	msg := NewOutputMessage(data)
 
+	// 在锁内收集连接列表，锁外发送，避免持锁写WS阻塞
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	conns := make([]*WSConn, 0, len(s.conns))
 	for ws := range s.conns {
+		conns = append(conns, ws)
+	}
+	s.mu.Unlock()
+
+	for _, ws := range conns {
 		if err := ws.WriteJSON(msg); err != nil {
 			log.Printf("[Session %s] write to WS failed: %v", s.ID, err)
 		}
@@ -325,8 +335,7 @@ func (s *Session) GetOutput() []byte {
 
 // broadcastError 向所有连接广播错误消息
 func (s *Session) broadcastError(code, message string) {
-	msg := NewErrorMessage(code, message)
-	s.BroadcastMessage(msg)
+	s.BroadcastMessage(NewErrorMessage(code, message))
 }
 
 // startOutputReader 启动PTY输出读取goroutine

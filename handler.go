@@ -13,28 +13,28 @@ import (
 
 // APIResponse 统一API响应格式
 type APIResponse struct {
-	Code    int         `json:"code"`    // 业务状态码：0成功，非0失败
-	Message string      `json:"message"` // 描述信息
-	Data    interface{} `json:"data"`    // 业务数据
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data"`
 }
 
 // SessionDTO 会话数据传输对象
 type SessionDTO struct {
-	ID        string `json:"id"`         // 会话ID
-	Name      string `json:"name"`       // 会话名称
-	Status    string `json:"status"`     // 会话状态
-	CreatedAt int64  `json:"created_at"` // 创建时间戳(Unix)
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 // CreateSessionRequest 创建会话请求
 type CreateSessionRequest struct {
-	Name  *string `json:"name"`  // 会话名称（可选）
-	Shell *string `json:"shell"` // Shell路径（可选）
+	Name  *string `json:"name"`
+	Shell *string `json:"shell"`
 }
 
 // RenameSessionRequest 重命名会话请求
 type RenameSessionRequest struct {
-	Name string `json:"name"` // 新名称
+	Name string `json:"name"`
 }
 
 // ==================== 业务状态码 ====================
@@ -52,9 +52,9 @@ const (
 
 // Handler HTTP/WebSocket处理器
 type Handler struct {
-	pool      *SessionPool       // 会话池
-	tokenAuth *TokenAuth         // Token认证器
-	upgrader  websocket.Upgrader // WebSocket升级器
+	pool      *SessionPool
+	tokenAuth *TokenAuth
+	upgrader  websocket.Upgrader
 }
 
 // NewHandler 创建处理器
@@ -65,7 +65,6 @@ func NewHandler(pool *SessionPool, tokenAuth *TokenAuth) *Handler {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			// 允许所有来源，Token认证负责安全
 			CheckOrigin: func(r *http.Request) bool {
 				return true
 			},
@@ -75,7 +74,6 @@ func NewHandler(pool *SessionPool, tokenAuth *TokenAuth) *Handler {
 
 // RegisterRoutes 注册所有路由到Gin引擎
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
-	// API路由组，需要Token认证
 	api := r.Group("/api")
 	api.Use(h.tokenAuth.GinMiddleware())
 	{
@@ -85,11 +83,10 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		api.PUT("/sessions/:id/rename", h.HandleRenameSession)
 	}
 
-	// WebSocket路由（Token在query参数中验证）
 	r.GET("/ws", h.HandleWebSocket)
 }
 
-// HandleSessions GET /api/sessions - 获取会话列表
+// HandleSessions GET /api/sessions
 func (h *Handler) HandleSessions(c *gin.Context) {
 	sessions := h.pool.List()
 	dtos := make([]SessionDTO, 0, len(sessions))
@@ -112,11 +109,10 @@ func (h *Handler) HandleSessions(c *gin.Context) {
 	})
 }
 
-// HandleCreateSession POST /api/sessions - 创建新会话
+// HandleCreateSession POST /api/sessions
 func (h *Handler) HandleCreateSession(c *gin.Context) {
 	var req CreateSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		// 请求体为空时使用默认值
 		req = CreateSessionRequest{}
 	}
 
@@ -169,7 +165,7 @@ func (h *Handler) HandleCreateSession(c *gin.Context) {
 	})
 }
 
-// HandleCloseSession DELETE /api/sessions/:id - 关闭会话
+// HandleCloseSession DELETE /api/sessions/:id
 func (h *Handler) HandleCloseSession(c *gin.Context) {
 	id := c.Param("id")
 
@@ -197,7 +193,7 @@ func (h *Handler) HandleCloseSession(c *gin.Context) {
 	})
 }
 
-// HandleRenameSession PUT /api/sessions/:id/rename - 重命名会话
+// HandleRenameSession PUT /api/sessions/:id/rename
 func (h *Handler) HandleRenameSession(c *gin.Context) {
 	id := c.Param("id")
 
@@ -232,7 +228,6 @@ func (h *Handler) HandleRenameSession(c *gin.Context) {
 		return
 	}
 
-	// 返回更新后的会话信息
 	session, ok := h.pool.Get(id)
 	if !ok {
 		c.JSON(http.StatusNotFound, APIResponse{
@@ -258,15 +253,13 @@ func (h *Handler) HandleRenameSession(c *gin.Context) {
 	})
 }
 
-// HandleWebSocket GET /ws - WebSocket升级
-// query参数: token(必需), session_id(可选，用于重连)
+// HandleWebSocket GET /ws
+// query参数: token(必需), session_id(可选，用于加入已有会话)
 func (h *Handler) HandleWebSocket(c *gin.Context) {
-	// 验证Token
 	if !h.tokenAuth.ValidateOrAbort(c) {
 		return
 	}
 
-	// 升级为WebSocket
 	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("[WebSocket] upgrade failed: %v", err)
@@ -279,7 +272,7 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 	var session *Session
 
 	if sessionID != "" {
-		// 重连模式：尝试附加到已有会话
+		// 加入已有会话
 		var found bool
 		session, found = h.pool.Get(sessionID)
 		if !found {
@@ -288,7 +281,6 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 			return
 		}
 
-		// 检查会话状态
 		session.mu.Lock()
 		if session.Status == SessionExited {
 			session.mu.Unlock()
@@ -299,7 +291,7 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		session.mu.Unlock()
 
 	} else {
-		// 新建模式：创建新会话
+		// 创建新会话
 		session, err = h.pool.Create("", "")
 		if err != nil {
 			_ = ws.WriteJSON(NewErrorMessage("SESSION_CREATE_FAILED", err.Error()))
@@ -308,16 +300,16 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		}
 	}
 
-	// 发送会话信息
+	// 立即注册连接到会话（默认尺寸24x80），确保不丢失任何PTY输出
+	session.AddConn(ws, 24, 80)
+
+	// 发送会话信息（客户端需要先收到此消息才能正确处理后续输出）
 	_ = ws.WriteJSON(NewSessionInfoMessage(session))
 
-	// 发送缓冲区内容（重连回显）
+	// 发送缓冲区内容（重连/加入时回显已有输出）
 	if output := session.GetOutput(); len(output) > 0 {
 		_ = ws.WriteJSON(NewOutputMessage(output))
 	}
-
-	// 注意：连接的尺寸在收到第一条resize消息时注册，
-	// 初始先用默认值，前端ws.onopen会立即发送resize
 
 	log.Printf("[WebSocket] connected to session %s", session.ID)
 
@@ -327,23 +319,16 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 
 // handleWSMessages 处理WebSocket消息循环
 func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
-	// 连接注册标记：收到第一条resize后注册到session
-	registered := false
-
 	defer func() {
-		// 断开时从会话移除连接
-		if registered {
-			newPtyRows, newPtyCols, shouldNotify := session.RemoveConn(ws)
-			if shouldNotify {
-				// 通知其他连接PTY尺寸变更
-				session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
-			}
+		// 断开时从会话移除连接，通知其他连接PTY尺寸可能变更
+		newPtyRows, newPtyCols, shouldNotify := session.RemoveConn(ws)
+		if shouldNotify {
+			session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
 		}
 		_ = ws.Close()
 		log.Printf("[WebSocket] disconnected from session %s", session.ID)
 	}()
 
-	// 设置读取超时和ping/pong处理
 	const readTimeout = 60 * time.Second
 	ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
 	ws.conn.SetPongHandler(func(appData string) error {
@@ -360,22 +345,20 @@ func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
 			return
 		}
 
-		// 解析消息
 		msg, err := ParseMessage(message)
 		if err != nil {
 			log.Printf("[WebSocket] invalid message from session %s: %v", session.ID, err)
 			continue
 		}
 
-		// 根据消息类型处理
 		switch msg.Type {
 		case MsgInput:
-			h.handleInput(ws, session, msg)
+			h.handleInput(session, msg)
 		case MsgResize:
-			registered = h.handleResize(ws, session, msg, registered)
+			h.handleResize(ws, session, msg)
 		case MsgPing:
 			_ = ws.WriteJSON(NewPongMessage())
-			ws.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
 		default:
 			log.Printf("[WebSocket] unknown message type %q from session %s", msg.Type, session.ID)
 		}
@@ -383,10 +366,10 @@ func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
 }
 
 // handleInput 处理终端输入消息
-func (h *Handler) handleInput(ws *WSConn, session *Session, msg *WSMessage) {
+func (h *Handler) handleInput(session *Session, msg *WSMessage) {
 	data, err := msg.DecodeData()
 	if err != nil {
-		log.Printf("[WebSocket] failed to decode input data for session %s: %v", session.ID, err)
+		log.Printf("[WebSocket] failed to decode input for session %s: %v", session.ID, err)
 		return
 	}
 
@@ -398,31 +381,16 @@ func (h *Handler) handleInput(ws *WSConn, session *Session, msg *WSMessage) {
 }
 
 // handleResize 处理终端尺寸变更消息
-// 返回是否已注册到会话
-func (h *Handler) handleResize(ws *WSConn, session *Session, msg *WSMessage, registered bool) bool {
+// 连接已在HandleWebSocket中注册，此处仅更新尺寸
+func (h *Handler) handleResize(ws *WSConn, session *Session, msg *WSMessage) {
 	rows, cols, err := msg.GetResize()
 	if err != nil {
-		log.Printf("[WebSocket] invalid resize message from session %s: %v", session.ID, err)
-		return registered
+		log.Printf("[WebSocket] invalid resize for session %s: %v", session.ID, err)
+		return
 	}
 
-	if !registered {
-		// 第一次收到resize，注册连接到会话
-		newPtyRows, newPtyCols := session.AddConn(ws, rows, cols)
-		registered = true
-
-		// 通知该连接当前PTY尺寸（可能比其窗口更小）
-		if newPtyRows != rows || newPtyCols != cols {
-			_ = ws.WriteJSON(NewPtyResizeMessage(newPtyRows, newPtyCols))
-		}
-	} else {
-		// 更新连接尺寸
-		newPtyRows, newPtyCols, ptyChanged := session.UpdateConnSize(ws, rows, cols)
-		if ptyChanged {
-			// PTY尺寸变更，通知所有连接
-			session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
-		}
+	newPtyRows, newPtyCols, ptyChanged := session.UpdateConnSize(ws, rows, cols)
+	if ptyChanged {
+		session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
 	}
-
-	return registered
 }

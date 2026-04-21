@@ -183,6 +183,9 @@ const Sidebar = {
     switchSession(sessionId) {
         if (sessionId === App.currentSessionId) return;
 
+        // 清空终端内容，准备加载新会话的输出
+        TermMgr.clear();
+
         // 断开当前WebSocket连接（不关闭会话，仅解除绑定）
         if (App.ws) {
             App.manualClose = true;
@@ -190,7 +193,7 @@ const Sidebar = {
             App.ws = null;
         }
 
-        // 连接到目标会话
+        // 连接到目标会话（带sessionId，服务端会加入已有会话并回显缓冲区）
         App.currentSessionId = sessionId;
         App.connect(sessionId);
 
@@ -207,12 +210,16 @@ const Sidebar = {
         try {
             const data = await App.apiRequest('POST', '/api/sessions', {});
             if (data && data.data) {
-                // 切换到新会话
+                // 清空终端，准备加载新会话
+                TermMgr.clear();
+
+                // 断开当前连接
                 if (App.ws) {
                     App.manualClose = true;
                     App.ws.close();
                     App.ws = null;
                 }
+                // 连接到新会话（带sessionId，服务端会加入该会话并回显）
                 App.currentSessionId = data.data.id;
                 App.connect(data.data.id);
                 App.showToast('新会话已创建', 'success');
