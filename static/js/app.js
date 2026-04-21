@@ -12,6 +12,8 @@ const App = {
     reconnectTimer: null,       // 重连定时器
     manualClose: false,         // 是否主动关闭（不触发自动重连）
     pingInterval: null,         // 心跳定时器
+    _initialized: false,        // UI是否已初始化（防止重复初始化）
+    _tokenSubmitBound: false,   // Token提交事件是否已绑定（防止重复绑定）
 
     /**
      * 初始化应用
@@ -35,59 +37,84 @@ const App = {
         document.getElementById('token-input').value = '';
         document.getElementById('token-error').style.display = 'none';
 
-        const submitHandler = () => {
-            const token = document.getElementById('token-input').value.trim();
-            if (!token) {
-                document.getElementById('token-error').textContent = 'Token不能为空';
-                document.getElementById('token-error').style.display = 'block';
-                return;
-            }
-            this.token = token;
-            localStorage.setItem('terminal_token', token);
-            document.getElementById('token-modal').style.display = 'none';
-            this.startApp();
-        };
+        // 避免重复绑定事件
+        if (!this._tokenSubmitBound) {
+            this._tokenSubmitBound = true;
 
-        document.getElementById('token-submit').onclick = submitHandler;
-        document.getElementById('token-input').onkeydown = (e) => {
-            if (e.key === 'Enter') submitHandler();
-        };
+            document.getElementById('token-submit').addEventListener('click', () => {
+                this._submitToken();
+            });
+            document.getElementById('token-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    this._submitToken();
+                }
+            });
+        }
 
-        document.getElementById('token-input').focus();
+        // 延迟聚焦，确保弹窗已渲染
+        setTimeout(() => {
+            document.getElementById('token-input').focus();
+        }, 100);
+    },
+
+    /**
+     * 提交Token
+     */
+    _submitToken() {
+        const token = document.getElementById('token-input').value.trim();
+        if (!token) {
+            document.getElementById('token-error').textContent = 'Token不能为空';
+            document.getElementById('token-error').style.display = 'block';
+            return;
+        }
+        if (token.length < 8) {
+            document.getElementById('token-error').textContent = 'Token长度不能少于8个字符';
+            document.getElementById('token-error').style.display = 'block';
+            return;
+        }
+        this.token = token;
+        localStorage.setItem('terminal_token', token);
+        document.getElementById('token-modal').style.display = 'none';
+        this.startApp();
     },
 
     /**
      * 启动应用主界面
      */
     async startApp() {
-        // 显示主界面
-        document.getElementById('app').style.display = 'flex';
+        // 首次初始化UI（只执行一次）
+        if (!this._initialized) {
+            this._initialized = true;
 
-        // 初始化终端
-        const container = document.getElementById('xterm-terminal');
-        TermMgr.init(container);
+            // 显示主界面
+            document.getElementById('app').style.display = 'flex';
 
-        // 初始化虚拟键盘
-        Keyboard.init();
+            // 初始化终端
+            const container = document.getElementById('xterm-terminal');
+            TermMgr.init(container);
 
-        // 初始化侧边栏
-        Sidebar.init();
+            // 初始化虚拟键盘
+            Keyboard.init();
 
-        // 绑定导出按钮
-        document.getElementById('btn-export').addEventListener('click', () => {
-            Export.exportOutput(TermMgr.term, this.currentSessionName);
-        });
+            // 初始化侧边栏
+            Sidebar.init();
 
-        // 绑定虚拟键盘切换按钮
-        document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
-            Keyboard.toggle();
-        });
+            // 绑定导出按钮
+            document.getElementById('btn-export').addEventListener('click', () => {
+                Export.exportOutput(TermMgr.term, this.currentSessionName);
+            });
 
-        // 绑定重连按钮
-        document.getElementById('btn-reconnect').addEventListener('click', () => {
-            this.reconnectAttempts = 0;
-            this.connect(this.currentSessionId);
-        });
+            // 绑定虚拟键盘切换按钮
+            document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
+                Keyboard.toggle();
+            });
+
+            // 绑定重连按钮
+            document.getElementById('btn-reconnect').addEventListener('click', () => {
+                this.reconnectAttempts = 0;
+                this.connect(this.currentSessionId);
+            });
+        }
 
         // 验证Token有效性并连接
         try {
@@ -95,7 +122,7 @@ const App = {
             // Token有效，建立WebSocket连接
             this.connect();
         } catch (e) {
-            // Token无效
+            // Token无效，清除并重新输入
             localStorage.removeItem('terminal_token');
             this.token = null;
             this.showToast('Token验证失败，请重新输入', 'error');
