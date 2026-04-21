@@ -78,8 +78,15 @@ const App = {
         }
         this.token = token;
         localStorage.setItem('terminal_token', token);
-        document.getElementById('token-modal').style.display = 'none';
-        this.startApp();
+        
+        // 先隐藏token弹窗，确保用户能看到主界面
+        const tokenModal = document.getElementById('token-modal');
+        tokenModal.style.display = 'none';
+        
+        // 使用setTimeout确保DOM更新后再继续
+        setTimeout(() => {
+            this.startApp();
+        }, 50);
     },
 
     /**
