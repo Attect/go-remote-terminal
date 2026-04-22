@@ -26,13 +26,95 @@ const App = {
      * 初始化应用
      */
     init() {
+        // 页面刷新或关闭时，设置manualClose防止重连
+        window.addEventListener('beforeunload', () => {
+            this.manualClose = true;
+            if (this.ws) {
+                this.ws.close();
+            }
+        });
+        
+        // 页面可见性变化处理
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                // 页面隐藏，不做操作
+            } else if (document.visibilityState === 'visible') {
+                // 页面恢复可见，检查连接状态
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    // 连接已断开，尝试重连
+                    if (this.token && this.currentSessionId) {
+                        this.reconnectAttempts = 0;
+                        this.connect(this.currentSessionId);
+                    }
+                }
+            }
+        });
+
+        // 先检查是否有保存的token，如果有，验证并尝试连接已有会话
         const savedToken = localStorage.getItem('terminal_token');
         if (savedToken) {
             this.token = savedToken;
-            this.startApp();
+            // 验证token并获取会话列表
+            this.validateTokenAndConnect();
         } else {
             this.showTokenModal();
         }
+    },
+
+    /**
+     * 验证Token并连接已有会话或创建新会话
+     */
+    async validateTokenAndConnect() {
+        try {
+            // 验证token并获取会话列表
+            const data = await this.apiRequest('GET', '/api/sessions');
+            
+            // Token有效，显示主界面
+            document.getElementById('app').style.display = 'flex';
+            
+            // 初始化UI
+            if (!this._initialized) {
+                this._initialized = true;
+                TermMgr.init(document.getElementById('xterm-terminal'));
+                Keyboard.init();
+                Sidebar.init();
+                this.bindToolbarEvents();
+            }
+            
+            // 如果有已有会话，加入第一个；否则创建新会话
+            if (data.data && data.data.length > 0) {
+                // 加入已有会话
+                const session = data.data[0];
+                this.currentSessionId = session.id;
+                this.currentSessionName = session.name;
+                this.connect(session.id);
+            } else {
+                // 创建新会话
+                this.connect();  // 不带sessionId，让服务端创建新会话
+            }
+        } catch (e) {
+            // Token无效
+            console.error('[App] token validation failed:', e);
+            localStorage.removeItem('terminal_token');
+            this.token = null;
+            this.showTokenModal();
+        }
+    },
+
+    /**
+     * 绑定工具栏事件
+     */
+    bindToolbarEvents() {
+        document.getElementById('btn-export').addEventListener('click', () => {
+            Export.exportOutput(TermMgr.term, this.currentSessionName);
+        });
+        document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
+            Keyboard.toggle();
+        });
+        document.getElementById('btn-reconnect').addEventListener('click', () => {
+            this.reconnectAttempts = 0;
+            this.connect(this.currentSessionId);
+        });
     },
 
     /**
@@ -95,7 +177,7 @@ const App = {
             tokenModal.style.display = 'none';
         }
         
-        this.startApp();
+        this.validateTokenAndConnect();
     },
 
     /**
@@ -106,18 +188,27 @@ const App = {
      */
     connect(sessionId) {
         // 防止并发连接
-        if (this._connecting) return;
+        if (this._connecting) {
+            console.log('[App] already connecting, skip');
+            return;
+        }
         
-        // 先标记为手动关闭，防止关闭旧连接时触发onclose中的自动重连
-        this.manualClose = true;
-        this._connecting = true;
-
-        // 关闭旧连接
+        // 如果已有连接，先标记为手动关闭并等待一小段时间确保旧连接关闭
         if (this.ws) {
-            this.ws.close();
+            this.manualClose = true;
+            const oldWs = this.ws;
             this.ws = null;
+            // 延迟关闭旧连接，确保不会立即触发onclose
+            setTimeout(() => {
+                try {
+                    if (oldWs.readyState === WebSocket.OPEN) {
+                        oldWs.close();
+                    }
+                } catch (e) {}
+            }, 100);
         }
 
+        this._connecting = true;
         this.manualClose = false;
         this.updateConnectionStatus('connecting');
 
@@ -164,14 +255,33 @@ const App = {
             }
         };
 
+        // 页面刷新或关闭时，设置manualClose防止重连
+        window.addEventListener('beforeunload', () => {
+            this.manualClose = true;
+        });
+
+        // 页面可见性变化（切换标签页时）也设置manualClose
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                // 页面隐藏，不做操作
+            } else if (document.visibilityState === 'visible') {
+                // 页面恢复可见，检查连接状态
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    // 连接已断开，需要重连
+                }
+            }
+        });
+
         this.ws.onclose = (event) => {
             this._connecting = false;
             console.log('[App] WebSocket closed:', event.code, event.reason);
             this.stopPing();
             this.updateConnectionStatus('disconnected');
 
-            if (!this.manualClose) {
+            if (!this.manualClose && this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.scheduleReconnect();
+            } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                this.showToast('连接已断开，请刷新页面重新连接', 'error');
             }
         };
 
@@ -344,51 +454,6 @@ const App = {
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
             this.pingInterval = null;
-        }
-    },
-
-    /**
-     * 启动应用主界面
-     */
-    async startApp() {
-        // 首次初始化UI（只执行一次）
-        if (!this._initialized) {
-            this._initialized = true;
-
-            // 显示主界面
-            document.getElementById('app').style.display = 'flex';
-
-            const container = document.getElementById('xterm-terminal');
-            TermMgr.init(container);
-
-            Keyboard.init();
-            Sidebar.init();
-
-            document.getElementById('btn-export').addEventListener('click', () => {
-                Export.exportOutput(TermMgr.term, this.currentSessionName);
-            });
-
-            document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
-                Keyboard.toggle();
-            });
-
-            document.getElementById('btn-reconnect').addEventListener('click', () => {
-                this.reconnectAttempts = 0;
-                this.connect(this.currentSessionId);
-            });
-        }
-
-        // 验证Token有效性并连接
-        try {
-            await this.apiRequest('GET', '/api/sessions');
-            // Token有效，建立WebSocket连接
-            this.connect();
-        } catch (e) {
-            // Token无效，清除并重新输入
-            localStorage.removeItem('terminal_token');
-            this.token = null;
-            this.showToast('Token验证失败，请重新输入', 'error');
-            this.showTokenModal();
         }
     },
 
