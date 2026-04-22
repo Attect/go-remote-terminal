@@ -15,8 +15,8 @@
         <div class="modal-box">
             <h2>Web Terminal</h2>
             <p>请输入访问令牌以连接终端服务</p>
-            <input type="password" id="token-input" placeholder="输入Token..." autocomplete="off" autofocus>
-            <button id="token-submit" class="btn-primary" type="button">连接</button>
+            <input type="password" id="token-input" placeholder="输入Token..." autocomplete="off" autofocus onkeydown="if(event.key==='Enter')document.getElementById('token-submit').click()">
+            <button id="token-submit" class="btn-primary" type="button" onclick="App._submitToken()">连接</button>
             <div id="token-error" class="error-text" style="display:none;"></div>
         </div>
     </div>
