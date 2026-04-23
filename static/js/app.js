@@ -33,28 +33,10 @@ const App = {
                 this.ws.close();
             }
         });
-        
-        // 页面可见性变化处理
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') {
-                // 页面隐藏，不做操作
-            } else if (document.visibilityState === 'visible') {
-                // 页面恢复可见，检查连接状态
-                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-                    // 连接已断开，尝试重连
-                    if (this.token && this.currentSessionId) {
-                        this.reconnectAttempts = 0;
-                        this.connect(this.currentSessionId);
-                    }
-                }
-            }
-        });
 
-        // 先检查是否有保存的token，如果有，验证并尝试连接已有会话
         const savedToken = localStorage.getItem('terminal_token');
         if (savedToken) {
             this.token = savedToken;
-            // 验证token并获取会话列表
             this.validateTokenAndConnect();
         } else {
             this.showTokenModal();
@@ -180,7 +162,7 @@ const App = {
         this.validateTokenAndConnect();
     },
 
-    /**
+/**
      * 建立WebSocket连接
      * @param {string} sessionId - 会话ID（可选）
      *   - 不传：让服务端创建新会话（新标签页首次连接）
@@ -193,19 +175,13 @@ const App = {
             return;
         }
         
-        // 如果已有连接，先标记为手动关闭并等待一小段时间确保旧连接关闭
+        // 如果已有连接先同步关闭确保干净状态
         if (this.ws) {
-            this.manualClose = true;
-            const oldWs = this.ws;
+            try {
+                this.manualClose = true;
+                this.ws.close();
+            } catch (e) {}
             this.ws = null;
-            // 延迟关闭旧连接，确保不会立即触发onclose
-            setTimeout(() => {
-                try {
-                    if (oldWs.readyState === WebSocket.OPEN) {
-                        oldWs.close();
-                    }
-                } catch (e) {}
-            }, 100);
         }
 
         this._connecting = true;
