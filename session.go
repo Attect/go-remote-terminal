@@ -317,7 +317,7 @@ func (s *Session) WriteOutput(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	s.outputBuf.Write(data)
+	_, _ = s.outputBuf.Write(data)
 	frame := EncodeBinaryFrame(BinaryTypeOutput, data)
 
 	s.mu.Lock()
@@ -493,7 +493,7 @@ func (s *Session) startOutputReader(ctx context.Context) {
 			log.Printf("[Session %s] PTY read ended: %v", s.ID, err)
 			flush()
 			s.broadcastError("SESSION_EXITED", "Shell process has exited")
-			go s.Pty.Wait()
+			go func() { _, _ = s.Pty.Wait() }()
 			return
 		}
 	}

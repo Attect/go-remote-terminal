@@ -49,16 +49,8 @@ type V1Message struct {
 
 // MarshalJSON 自定义序列化，确保payload被正确嵌入
 func (m V1Message) MarshalJSON() ([]byte, error) {
-	type envelope struct {
-		Version int         `json:"v"`
-		Type    MessageType `json:"type"`
-		Payload interface{} `json:"payload"`
-	}
-	return json.Marshal(envelope{
-		Version: m.Version,
-		Type:    m.Type,
-		Payload: m.Payload,
-	})
+	type envelope V1Message
+	return json.Marshal(envelope(m))
 }
 
 // ==================== Payload 结构 ====================

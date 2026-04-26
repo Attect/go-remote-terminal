@@ -364,9 +364,9 @@ func (h *Handler) handleWSMessages(ws *WSConn, session *Session, readOnly bool, 
 	}()
 
 	const readTimeout = 60 * time.Second
-	ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
+	_ = ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
 	ws.conn.SetPongHandler(func(appData string) error {
-		ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
+		_ = ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
 		return nil
 	})
 
@@ -404,7 +404,7 @@ func (h *Handler) handleWSMessages(ws *WSConn, session *Session, readOnly bool, 
 			h.handleResize(ws, session, vmsg)
 		case MsgPing:
 			_ = ws.WriteJSON(NewPongMessage())
-			ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
+			_ = ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
 		case MsgTakeFocus:
 			h.handleTakeFocus(ws, session)
 		case MsgReleaseFocus:
