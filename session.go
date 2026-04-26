@@ -12,21 +12,25 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// ==================== 常量 ====================
+
+const (
+	defaultRingBufferSize = 1 * 1024 * 1024 // 1MB
+	MaxSessions           = 50               // 最大活跃会话数
+	SessionIdleTimeout    = 7 * 24 * time.Hour // 无连接会话超时
+)
+
 // ==================== RingBuffer ====================
 
 // RingBuffer 环形缓冲区，用于存储终端输出
-// 超过容量时自动覆盖最旧的数据，保证内存不无限增长
-const defaultRingBufferSize = 1 * 1024 * 1024 // 1MB
-
 type RingBuffer struct {
-	buf   []byte     // 底层缓冲区
-	size  int        // 缓冲区总容量
-	start int        // 数据起始位置
-	count int        // 当前数据量
-	mu    sync.Mutex // 并发锁
+	buf   []byte
+	size  int
+	start int
+	count int
+	mu    sync.Mutex
 }
 
-// NewRingBuffer 创建环形缓冲区
 func NewRingBuffer(size int) *RingBuffer {
 	if size <= 0 {
 		size = defaultRingBufferSize
@@ -37,36 +41,26 @@ func NewRingBuffer(size int) *RingBuffer {
 	}
 }
 
-// Write 写入数据，超过容量时自动覆盖最旧数据
-// 使用批量copy替代逐字节写入，提升大块数据写入效率
 func (rb *RingBuffer) Write(data []byte) (int, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
-
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
-
-	// 如果写入数据超过缓冲区容量，只保留最后size字节
 	if len(data) >= rb.size {
 		copy(rb.buf, data[len(data)-rb.size:])
 		rb.start = 0
 		rb.count = rb.size
 		return len(data), nil
 	}
-
-	// 计算需要覆盖的旧数据量
 	freeSpace := rb.size - rb.count
 	if freeSpace < len(data) {
-		// 需要覆盖旧数据，前移start
 		overflow := len(data) - freeSpace
 		rb.start = (rb.start + overflow) % rb.size
 		rb.count = rb.size
 	} else {
 		rb.count += len(data)
 	}
-
-	// 批量写入：从写入位置开始，可能需要分两段copy（环绕）
 	writePos := (rb.start + rb.count - len(data)) % rb.size
 	firstChunk := rb.size - writePos
 	if firstChunk > len(data) {
@@ -76,19 +70,15 @@ func (rb *RingBuffer) Write(data []byte) (int, error) {
 	if firstChunk < len(data) {
 		copy(rb.buf[0:], data[firstChunk:])
 	}
-
 	return len(data), nil
 }
 
-// ReadAll 读取所有缓冲数据
 func (rb *RingBuffer) ReadAll() []byte {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
-
 	if rb.count == 0 {
 		return nil
 	}
-
 	result := make([]byte, rb.count)
 	for i := 0; i < rb.count; i++ {
 		result[i] = rb.buf[(rb.start+i)%rb.size]
@@ -96,7 +86,6 @@ func (rb *RingBuffer) ReadAll() []byte {
 	return result
 }
 
-// Reset 重置缓冲区
 func (rb *RingBuffer) Reset() {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -106,163 +95,189 @@ func (rb *RingBuffer) Reset() {
 
 // ==================== WSConn ====================
 
-// WSConn WebSocket连接封装，增加写保护
-// gorilla/websocket的写操作非线程安全，需要加锁
 type WSConn struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
 }
 
-// NewWSConn 创建WebSocket连接封装
 func NewWSConn(conn *websocket.Conn) *WSConn {
 	return &WSConn{conn: conn}
 }
 
-// WriteMessage 线程安全地写入WebSocket消息
 func (w *WSConn) WriteMessage(messageType int, data []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.conn.WriteMessage(messageType, data)
 }
 
-// WriteJSON 线程安全地写入JSON消息
 func (w *WSConn) WriteJSON(v interface{}) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.conn.WriteJSON(v)
 }
 
-// ReadMessage 读取消息
 func (w *WSConn) ReadMessage() (int, []byte, error) {
 	return w.conn.ReadMessage()
 }
 
-// Close 关闭连接
 func (w *WSConn) Close() error {
 	return w.conn.Close()
 }
 
 // ==================== ConnInfo ====================
 
-// ConnInfo 记录每个WebSocket连接的信息
 type ConnInfo struct {
-	Rows uint16 // 终端行数
-	Cols uint16 // 终端列数
+	Rows     uint16 // 终端行数
+	Cols     uint16 // 终端列数
+	Name     string // 连接者名称
+	Color    string // 连接者颜色
+	Focus    bool   // 是否拥有输入焦点
+	ReadOnly bool   // 是否为只读连接
 }
 
 // ==================== Session ====================
 
-// SessionStatus 会话状态枚举
 type SessionStatus string
 
 const (
-	SessionActive SessionStatus = "active" // 进程运行中
-	SessionExited SessionStatus = "exited" // 进程已退出
+	SessionActive SessionStatus = "active"
+	SessionExited SessionStatus = "exited"
 )
 
-// Session 表示一个终端会话
-type Session struct {
-	ID        string                // 会话唯一标识，UUID格式
-	Name      string                // 会话显示名称
-	Pty       PtyProcess            // 关联的PTY进程
-	CreatedAt time.Time             // 创建时间
-	Status    SessionStatus         // 会话状态
-	mu        sync.Mutex            // 会话级别锁
-	outputBuf *RingBuffer           // 终端输出环形缓冲区
-	conns     map[*WSConn]*ConnInfo // 所有连接的WebSocket及其终端尺寸
-	cancelFn  context.CancelFunc    // PTY输出读取goroutine取消函数
+var connNames = []string{"红", "橙", "黄", "绿", "青", "蓝", "紫", "粉"}
+var connColors = []string{"#e94560", "#ff9800", "#ffd740", "#4caf50", "#00d4ff", "#2196f3", "#e040fb", "#ea80fc"}
+
+func generateConnIdentity() (string, string) {
+	b := make([]byte, 2)
+	if _, err := rand.Read(b); err != nil {
+		return "用户-????", "#e94560"
+	}
+	idx := int(b[0]) % len(connNames)
+	suffix := hex.EncodeToString(b)
+	return "用户-" + suffix[:4], connColors[idx]
 }
 
-// newSession 创建新会话（内部方法）
+type Session struct {
+	ID           string
+	Name         string
+	Pty          PtyProcess
+	CreatedAt    time.Time
+	LastConnTime time.Time          // 最后一次有连接的时间
+	Status       SessionStatus
+	mu           sync.Mutex
+	outputBuf    *RingBuffer
+	conns        map[*WSConn]*ConnInfo
+	cancelFn     context.CancelFunc
+	ptyRows      uint16
+	ptyCols      uint16
+	FocusConn    *WSConn // 当前拥有输入焦点的连接
+}
+
 func newSession(id, name string, ptyProc PtyProcess) *Session {
+	now := time.Now()
 	return &Session{
-		ID:        id,
-		Name:      name,
-		Pty:       ptyProc,
-		CreatedAt: time.Now(),
-		Status:    SessionActive,
-		outputBuf: NewRingBuffer(defaultRingBufferSize),
-		conns:     make(map[*WSConn]*ConnInfo),
+		ID:           id,
+		Name:         name,
+		Pty:          ptyProc,
+		CreatedAt:    now,
+		LastConnTime: now,
+		Status:       SessionActive,
+		outputBuf:    NewRingBuffer(defaultRingBufferSize),
+		conns:        make(map[*WSConn]*ConnInfo),
+		ptyRows:      24,
+		ptyCols:      80,
 	}
 }
 
-// AddConn 添加WebSocket连接到会话
-// 返回当前PTY尺寸，用于通知新连接适配
-func (s *Session) AddConn(ws *WSConn, rows, cols uint16) (ptyRows, ptyCols uint16) {
+func (s *Session) AddConn(ws *WSConn, rows, cols uint16, readOnly bool) (ptyRows, ptyCols uint16) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.conns[ws] = &ConnInfo{Rows: rows, Cols: cols}
+	name, color := generateConnIdentity()
+	s.conns[ws] = &ConnInfo{
+		Rows:     rows,
+		Cols:     cols,
+		Name:     name,
+		Color:    color,
+		ReadOnly: readOnly,
+	}
+	s.LastConnTime = time.Now()
 
-	// 如果只有一个连接，直接将PTY调整到该连接的尺寸
-	if len(s.conns) == 1 {
-		if s.Pty != nil {
-			_ = s.Pty.Resize(rows, cols)
-		}
-		return rows, cols
+	// 如果没有主控且此连接不是只读，自动成为主控
+	if s.FocusConn == nil && !readOnly {
+		s.FocusConn = ws
+		s.conns[ws].Focus = true
 	}
 
-	// 多个连接时，计算最小尺寸
 	minRows, minCols := s.calcMinSizeLocked()
 	if s.Pty != nil {
 		_ = s.Pty.Resize(minRows, minCols)
 	}
+	s.ptyRows = minRows
+	s.ptyCols = minCols
 	return minRows, minCols
 }
 
-// RemoveConn 移除WebSocket连接
-// 返回是否需要通知其他连接（PTY尺寸可能变更）
 func (s *Session) RemoveConn(ws *WSConn) (newPtyRows, newPtyCols uint16, shouldNotify bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	delete(s.conns, ws)
 
+	// 如果移除的是主控，尝试转移焦点给下一个非只读连接
+	if s.FocusConn == ws {
+		s.FocusConn = nil
+		for w, info := range s.conns {
+			if !info.ReadOnly {
+				s.FocusConn = w
+				info.Focus = true
+				break
+			}
+		}
+	}
+
 	if len(s.conns) == 0 {
 		return 0, 0, false
 	}
 
-	// 连接移除后，重新计算最小尺寸
 	minRows, minCols := s.calcMinSizeLocked()
+	if minRows == s.ptyRows && minCols == s.ptyCols {
+		return minRows, minCols, false
+	}
+
 	if s.Pty != nil {
 		_ = s.Pty.Resize(minRows, minCols)
 	}
+	s.ptyRows = minRows
+	s.ptyCols = minCols
 	return minRows, minCols, true
 }
 
-// UpdateConnSize 更新指定连接的终端尺寸
-// 返回PTY是否需要调整尺寸，以及新的PTY尺寸
 func (s *Session) UpdateConnSize(ws *WSConn, rows, cols uint16) (newPtyRows, newPtyCols uint16, ptyChanged bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	info, ok := s.conns[ws]
 	if !ok {
-		// 连接不在会话中，先添加
 		s.conns[ws] = &ConnInfo{Rows: rows, Cols: cols}
 	} else {
 		info.Rows = rows
 		info.Cols = cols
 	}
 
-	// 重新计算最小尺寸
 	minRows, minCols := s.calcMinSizeLocked()
-
-	// 检查PTY尺寸是否需要变更
-	var curRows, curCols uint16 = 24, 80 // 默认值
-	if len(s.conns) > 0 {
-		curRows = minRows
-		curCols = minCols
+	if minRows == s.ptyRows && minCols == s.ptyCols {
+		return minRows, minCols, false
 	}
 
 	if s.Pty != nil {
 		_ = s.Pty.Resize(minRows, minCols)
 	}
-
-	return curRows, curCols, true
+	s.ptyRows = minRows
+	s.ptyCols = minCols
+	return minRows, minCols, true
 }
 
-// calcMinSizeLocked 计算所有连接中的最小终端尺寸（调用方需持有锁）
 func (s *Session) calcMinSizeLocked() (minRows, minCols uint16) {
 	minRows = 0
 	minCols = 0
@@ -274,7 +289,6 @@ func (s *Session) calcMinSizeLocked() (minRows, minCols uint16) {
 			minCols = info.Cols
 		}
 	}
-	// 兜底：确保最小值合理
 	if minRows == 0 {
 		minRows = 24
 	}
@@ -284,9 +298,7 @@ func (s *Session) calcMinSizeLocked() (minRows, minCols uint16) {
 	return
 }
 
-// BroadcastMessage 向所有连接广播消息
-// 先在锁内收集连接列表，再在锁外逐个发送，避免持锁写WS导致阻塞
-func (s *Session) BroadcastMessage(msg WSMessage) {
+func (s *Session) BroadcastMessage(msg V1Message) {
 	s.mu.Lock()
 	conns := make([]*WSConn, 0, len(s.conns))
 	for ws := range s.conns {
@@ -301,19 +313,13 @@ func (s *Session) BroadcastMessage(msg WSMessage) {
 	}
 }
 
-// WriteOutput 向会话的输出缓冲区写入数据，同时推送到所有已连接的WebSocket
 func (s *Session) WriteOutput(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-
-	// 写入环形缓冲区
 	s.outputBuf.Write(data)
+	frame := EncodeBinaryFrame(BinaryTypeOutput, data)
 
-	// 构建消息
-	msg := NewOutputMessage(data)
-
-	// 在锁内收集连接列表，锁外发送，避免持锁写WS阻塞
 	s.mu.Lock()
 	conns := make([]*WSConn, 0, len(s.conns))
 	for ws := range s.conns {
@@ -322,57 +328,175 @@ func (s *Session) WriteOutput(data []byte) {
 	s.mu.Unlock()
 
 	for _, ws := range conns {
-		if err := ws.WriteJSON(msg); err != nil {
-			log.Printf("[Session %s] write to WS failed: %v", s.ID, err)
+		if err := ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+			log.Printf("[Session %s] write binary to WS failed: %v", s.ID, err)
 		}
 	}
 }
 
-// GetOutput 获取输出缓冲区内容（用于重连回显和导出）
 func (s *Session) GetOutput() []byte {
 	return s.outputBuf.ReadAll()
 }
 
-// broadcastError 向所有连接广播错误消息
 func (s *Session) broadcastError(code, message string) {
 	s.BroadcastMessage(NewErrorMessage(code, message))
 }
 
-// startOutputReader 启动PTY输出读取goroutine
-// 该goroutine在Session创建时启动，WebSocket断开后继续运行
-func (s *Session) startOutputReader(ctx context.Context) {
-	buf := make([]byte, 4096)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
+func (s *Session) connDTOsLocked() []ConnDTO {
+	dtos := make([]ConnDTO, 0, len(s.conns))
+	for _, info := range s.conns {
+		dtos = append(dtos, ConnDTO{
+			Name:  info.Name,
+			Color: info.Color,
+			Focus: info.Focus,
+		})
+	}
+	return dtos
+}
+
+func (s *Session) BroadcastConnList() {
+	s.BroadcastMessage(NewConnListMessage(s))
+}
+
+func (s *Session) BroadcastFocusChange() {
+	s.mu.Lock()
+	name := ""
+	if s.FocusConn != nil {
+		if info, ok := s.conns[s.FocusConn]; ok {
+			name = info.Name
 		}
+	}
+	s.mu.Unlock()
+	s.BroadcastMessage(NewFocusChangeMessage(name))
+}
 
-		n, err := s.Pty.Read(buf)
-		if err != nil {
-			// PTY进程退出或读取错误
-			s.mu.Lock()
-			s.Status = SessionExited
-			s.mu.Unlock()
+func (s *Session) broadcastSessionInfo() {
+	s.mu.Lock()
+	conns := make(map[*WSConn]*ConnInfo)
+	for ws, info := range s.conns {
+		conns[ws] = info
+	}
+	s.mu.Unlock()
 
-			log.Printf("[Session %s] PTY read ended: %v", s.ID, err)
+	for ws, info := range conns {
+		msg := NewSessionInfoMessage(s, ws, info.ReadOnly)
+		_ = ws.WriteJSON(msg)
+	}
+}
 
-			// 通知所有已连接的WebSocket
-			s.broadcastError("SESSION_EXITED", "Shell process has exited")
-			return
+func (s *Session) TakeFocus(ws *WSConn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	info, ok := s.conns[ws]
+	if !ok || info.ReadOnly {
+		return false
+	}
+
+	if s.FocusConn != nil && s.FocusConn != ws {
+		if oldInfo, ok := s.conns[s.FocusConn]; ok {
+			oldInfo.Focus = false
 		}
-		if n > 0 {
-			s.WriteOutput(buf[:n])
+	}
+
+	s.FocusConn = ws
+	info.Focus = true
+	return true
+}
+
+func (s *Session) ReleaseFocus(ws *WSConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.FocusConn != ws {
+		return
+	}
+
+	s.FocusConn = nil
+	if info, ok := s.conns[ws]; ok {
+		info.Focus = false
+	}
+
+	for w, info := range s.conns {
+		if !info.ReadOnly {
+			s.FocusConn = w
+			info.Focus = true
+			break
 		}
 	}
 }
 
-// ConnCount 返回当前连接数
+func (s *Session) CanInput(ws *WSConn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info, ok := s.conns[ws]
+	if !ok || info.ReadOnly {
+		return false
+	}
+	return s.FocusConn == ws
+}
+
 func (s *Session) ConnCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.conns)
+}
+
+func (s *Session) startOutputReader(ctx context.Context) {
+	readCh := make(chan []byte, 16)
+	errCh := make(chan error, 1)
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := s.Pty.Read(buf)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if n > 0 {
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				select {
+				case readCh <- data:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+
+	var batch []byte
+	flush := func() {
+		if len(batch) > 0 {
+			s.WriteOutput(batch)
+			batch = nil
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			flush()
+			return
+		case <-ticker.C:
+			flush()
+		case data := <-readCh:
+			batch = append(batch, data...)
+		case err := <-errCh:
+			s.mu.Lock()
+			s.Status = SessionExited
+			s.mu.Unlock()
+			log.Printf("[Session %s] PTY read ended: %v", s.ID, err)
+			flush()
+			s.broadcastError("SESSION_EXITED", "Shell process has exited")
+			go s.Pty.Wait()
+			return
+		}
+	}
 }
 
 // ==================== 错误定义 ====================
@@ -390,23 +514,21 @@ var (
 	ErrSessionNotFound = &SessionError{Code: "SESSION_NOT_FOUND", Message: "session not found"}
 	ErrSessionExpired  = &SessionError{Code: "SESSION_EXPIRED", Message: "session process has exited"}
 	ErrInvalidName     = &SessionError{Code: "INVALID_SESSION_NAME", Message: "invalid session name"}
+	ErrSessionLimit    = &SessionError{Code: "SESSION_LIMIT", Message: "maximum number of sessions reached"}
 )
 
 // ==================== SessionPool ====================
 
-// SessionPool 管理所有活跃会话
 type SessionPool struct {
-	sessions  sync.Map // map[sessionID]*Session
-	counter   int64    // 会话计数器，用于生成默认名称
+	sessions  sync.Map
+	counter   int64
 	counterMu sync.Mutex
 }
 
-// NewSessionPool 创建会话池
 func NewSessionPool() *SessionPool {
 	return &SessionPool{}
 }
 
-// nextSessionName 生成默认会话名称
 func (p *SessionPool) nextSessionName() string {
 	p.counterMu.Lock()
 	defer p.counterMu.Unlock()
@@ -414,28 +536,50 @@ func (p *SessionPool) nextSessionName() string {
 	return fmt.Sprintf("终端 %d", p.counter)
 }
 
-// Create 创建新会话
+func (p *SessionPool) sessionCount() int {
+	count := 0
+	p.sessions.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+func (p *SessionPool) closeOldestSession() {
+	var oldest *Session
+	p.sessions.Range(func(_, value interface{}) bool {
+		session := value.(*Session)
+		if oldest == nil || session.CreatedAt.Before(oldest.CreatedAt) {
+			oldest = session
+		}
+		return true
+	})
+	if oldest != nil {
+		_ = p.Close(oldest.ID)
+	}
+}
+
 func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
-	// 确定会话名称
 	if name == "" {
 		name = p.nextSessionName()
 	}
-	// 验证名称长度
 	if len(name) > 50 {
 		return nil, ErrInvalidName
 	}
 
-	// 检测Shell
+	// 检查会话上限
+	if p.sessionCount() >= MaxSessions {
+		p.closeOldestSession()
+	}
+
 	shellConfig, err := DetectShellWithOverride(shellPath)
 	if err != nil {
 		log.Printf("[SessionPool] shell detection warning: %v", err)
-		// 即使有警告，也使用回退的默认Shell
 		if shellConfig == nil {
 			return nil, &SessionError{Code: "SHELL_NOT_FOUND", Message: err.Error()}
 		}
 	}
 
-	// 创建PTY进程
 	ptyProc := NewPtyProcess()
 	if err := ptyProc.Start(shellConfig.Path, shellConfig.Args, 24, 80); err != nil {
 		return nil, &SessionError{
@@ -444,18 +588,13 @@ func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
 		}
 	}
 
-	// 生成会话ID
 	sessionID := generateSessionID()
-
-	// 创建会话
 	session := newSession(sessionID, name, ptyProc)
 
-	// 启动PTY输出读取goroutine
 	ctx, cancel := context.WithCancel(context.Background())
 	session.cancelFn = cancel
 	go session.startOutputReader(ctx)
 
-	// 存入会话池
 	p.sessions.Store(sessionID, session)
 
 	log.Printf("[SessionPool] created session %s (name=%s, shell=%s, pid=%d)",
@@ -464,7 +603,6 @@ func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
 	return session, nil
 }
 
-// Get 获取指定会话
 func (p *SessionPool) Get(id string) (*Session, bool) {
 	val, ok := p.sessions.Load(id)
 	if !ok {
@@ -473,7 +611,6 @@ func (p *SessionPool) Get(id string) (*Session, bool) {
 	return val.(*Session), true
 }
 
-// List 获取所有活跃会话列表
 func (p *SessionPool) List() []*Session {
 	var list []*Session
 	p.sessions.Range(func(key, value interface{}) bool {
@@ -483,7 +620,6 @@ func (p *SessionPool) List() []*Session {
 	return list
 }
 
-// Close 关闭指定会话，终止子进程并释放资源
 func (p *SessionPool) Close(id string) error {
 	val, ok := p.sessions.Load(id)
 	if !ok {
@@ -492,19 +628,18 @@ func (p *SessionPool) Close(id string) error {
 
 	session := val.(*Session)
 
-	// 取消输出读取goroutine
 	if session.cancelFn != nil {
 		session.cancelFn()
 	}
 
-	// 关闭PTY进程
 	if session.Pty != nil {
 		if err := session.Pty.Close(); err != nil {
 			log.Printf("[SessionPool] close PTY for session %s failed: %v", id, err)
 		}
 	}
 
-	// 关闭所有WebSocket连接
+	session.broadcastError("SESSION_CLOSED", "session has been closed by another client")
+
 	session.mu.Lock()
 	for ws := range session.conns {
 		_ = ws.Close()
@@ -512,14 +647,12 @@ func (p *SessionPool) Close(id string) error {
 	session.conns = make(map[*WSConn]*ConnInfo)
 	session.mu.Unlock()
 
-	// 从池中移除
 	p.sessions.Delete(id)
 
 	log.Printf("[SessionPool] closed session %s", id)
 	return nil
 }
 
-// Rename 重命名会话
 func (p *SessionPool) Rename(id, newName string) error {
 	val, ok := p.sessions.Load(id)
 	if !ok {
@@ -539,20 +672,26 @@ func (p *SessionPool) Rename(id, newName string) error {
 	return nil
 }
 
-// Cleanup 清理已退出会话的资源
 func (p *SessionPool) Cleanup() {
 	p.sessions.Range(func(key, value interface{}) bool {
 		session := value.(*Session)
+		shouldClean := false
+
+		session.mu.Lock()
 		if session.Status == SessionExited {
-			// 取消输出读取goroutine
+			shouldClean = true
+		} else if len(session.conns) == 0 && time.Since(session.LastConnTime) > SessionIdleTimeout {
+			shouldClean = true
+		}
+		session.mu.Unlock()
+
+		if shouldClean {
 			if session.cancelFn != nil {
 				session.cancelFn()
 			}
-			// 关闭PTY
 			if session.Pty != nil {
 				_ = session.Pty.Close()
 			}
-			// 关闭所有WebSocket
 			session.mu.Lock()
 			for ws := range session.conns {
 				_ = ws.Close()
@@ -561,31 +700,23 @@ func (p *SessionPool) Cleanup() {
 			session.mu.Unlock()
 
 			p.sessions.Delete(key)
-			log.Printf("[SessionPool] cleaned up exited session %s", key)
+			log.Printf("[SessionPool] cleaned up session %s", key)
 		}
 		return true
 	})
 }
 
-// ==================== 辅助函数 ====================
-
-// generateSessionID 生成会话ID
 func generateSessionID() string {
-	// 使用crypto/rand生成UUID v4
 	return generateUUID()
 }
 
-// generateUUID 生成UUID格式的会话ID
 func generateUUID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// 回退：使用时间戳
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
-	// 设置版本4和变体位
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
-
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%s-%s-%s-%s-%s",
 		hex.EncodeToString(b[0:4]),
 		hex.EncodeToString(b[4:6]),

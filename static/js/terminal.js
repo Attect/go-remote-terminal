@@ -19,6 +19,7 @@ const TermMgr = {
     _serverResizeInProgress: false, // 服务端resize进行中标记，防止反馈循环
     _resizeHandler: null,     // window resize事件处理器
     _resizeObserver: null,    // ResizeObserver实例
+    searchAddon: null,        // 搜索插件实例
 
     /**
      * 初始化终端
@@ -67,6 +68,38 @@ const TermMgr = {
         // 创建fit插件
         this.fitAddon = new FitAddon.FitAddon();
         this.term.loadAddon(this.fitAddon);
+
+        // 创建搜索插件
+        if (typeof SearchAddon !== 'undefined') {
+            this.searchAddon = new SearchAddon.SearchAddon();
+            this.term.loadAddon(this.searchAddon);
+        }
+
+        // 绑定自定义快捷键：Ctrl+Shift+F 搜索，Ctrl+Shift+C 复制
+        this.term.attachCustomKeyEventHandler((e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+                e.preventDefault();
+                if (this.searchAddon) {
+                    this.searchAddon.findNext('');
+                }
+                return false;
+            }
+            if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+                e.preventDefault();
+                App.copySelection();
+                return false;
+            }
+            // 允许 xterm.js 默认的选中复制和右键菜单
+            return true;
+        });
+
+        // 鼠标滚轮支持（xterm.js默认处理，额外确保viewport可滚动）
+        container.addEventListener('wheel', (e) => {
+            if (this.term) {
+                // xterm.js内部已处理滚动，这里不做拦截
+                e.stopPropagation();
+            }
+        }, { passive: true });
 
         // 打开终端
         this.term.open(container);
@@ -211,6 +244,13 @@ const TermMgr = {
     },
 
     /**
+     * 获取当前选中的文本内容
+     */
+    getSelection() {
+        return this.term ? this.term.getSelection() : '';
+    },
+
+    /**
      * 销毁终端实例
      */
     dispose() {
@@ -230,6 +270,7 @@ const TermMgr = {
             this.term.dispose();
             this.term = null;
             this.fitAddon = null;
+            this.searchAddon = null;
         }
     }
 };

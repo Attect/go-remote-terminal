@@ -23,7 +23,7 @@ func main() {
 	cfg := ParseConfig()
 
 	// 验证Token
-	tokenAuth := NewTokenAuth(cfg.Token)
+	tokenAuth := NewTokenAuth(cfg.Token, cfg.ReadOnlyToken)
 	tokenAuth.EnsureTokenConfigured()
 
 	// 验证配置

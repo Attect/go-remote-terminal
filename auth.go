@@ -10,66 +10,73 @@ import (
 
 // TokenAuth Token认证器
 type TokenAuth struct {
-	token string // 配置的访问令牌
+	token         string // 管理令牌（完整权限）
+	readOnlyToken string // 只读令牌（仅接收输出）
 }
 
 // NewTokenAuth 创建Token认证器
-func NewTokenAuth(token string) *TokenAuth {
-	return &TokenAuth{token: token}
+func NewTokenAuth(token, readOnlyToken string) *TokenAuth {
+	return &TokenAuth{token: token, readOnlyToken: readOnlyToken}
 }
 
-// Validate 验证Token是否匹配
-func (a *TokenAuth) Validate(provided string) bool {
-	if a.token == "" {
-		return false
+// ValidateResult 验证结果
+type ValidateResult int
+
+const (
+	ValidateInvalid  ValidateResult = iota // 无效Token
+	ValidateReadOnly                        // 只读Token
+	ValidateAdmin                           // 管理Token
+)
+
+// Validate 验证Token，返回验证结果
+func (a *TokenAuth) Validate(provided string) ValidateResult {
+	if a.token != "" && a.token == provided {
+		return ValidateAdmin
 	}
-	return a.token == provided
+	if a.readOnlyToken != "" && a.readOnlyToken == provided {
+		return ValidateReadOnly
+	}
+	return ValidateInvalid
 }
 
-// IsConfigured 检查Token是否已配置
+// IsConfigured 检查是否有任何Token已配置
 func (a *TokenAuth) IsConfigured() bool {
+	return a.token != "" || a.readOnlyToken != ""
+}
+
+// IsAdminConfigured 检查管理Token是否已配置
+func (a *TokenAuth) IsAdminConfigured() bool {
 	return a.token != ""
 }
 
 // GinMiddleware 返回Gin中间件，用于HTTP API认证
-// 从Header的Authorization: Bearer {token} 或 query参数token中提取
+// HTTP API只允许管理Token访问
 func (a *TokenAuth) GinMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !a.IsConfigured() {
+		if !a.IsAdminConfigured() {
 			c.JSON(http.StatusUnauthorized, APIResponse{
 				Code:    40100,
-				Message: "token not configured",
+				Message: "admin token not configured",
 			})
 			c.Abort()
 			return
 		}
 
-		// 优先从Header提取
 		token := a.extractFromHeader(c)
 		if token == "" {
-			// 其次从query参数提取
 			token = c.Query("token")
 		}
 
-		if !a.Validate(token) {
+		if a.Validate(token) != ValidateAdmin {
 			c.JSON(http.StatusUnauthorized, APIResponse{
 				Code:    40100,
-				Message: "invalid token",
+				Message: "invalid admin token",
 			})
 			c.Abort()
 			return
 		}
 
 		c.Next()
-	}
-}
-
-// WebSocketAuthFunc 返回WebSocket升级时的认证函数
-// 从query参数token中提取并验证
-func (a *TokenAuth) WebSocketAuthFunc() func(r *http.Request) bool {
-	return func(r *http.Request) bool {
-		token := r.URL.Query().Get("token")
-		return a.Validate(token)
 	}
 }
 
@@ -80,7 +87,6 @@ func (a *TokenAuth) extractFromHeader(c *gin.Context) string {
 		return ""
 	}
 
-	// 期望格式: Bearer {token}
 	const bearerPrefix = "Bearer "
 	if len(auth) > len(bearerPrefix) && auth[:len(bearerPrefix)] == bearerPrefix {
 		return auth[len(bearerPrefix):]
@@ -89,29 +95,7 @@ func (a *TokenAuth) extractFromHeader(c *gin.Context) string {
 	return auth
 }
 
-// ValidateOrAbort 验证Token，失败时终止请求（用于WebSocket handler）
-func (a *TokenAuth) ValidateOrAbort(c *gin.Context) bool {
-	if !a.IsConfigured() {
-		c.JSON(http.StatusUnauthorized, APIResponse{
-			Code:    40100,
-			Message: "token not configured",
-		})
-		return false
-	}
-
-	token := c.Query("token")
-	if !a.Validate(token) {
-		c.JSON(http.StatusUnauthorized, APIResponse{
-			Code:    40100,
-			Message: "invalid token",
-		})
-		return false
-	}
-
-	return true
-}
-
-// EnsureTokenConfigured 确保Token已配置，否则打印提示并退出
+// EnsureTokenConfigured 确保至少有一个Token已配置，否则打印提示并退出
 func (a *TokenAuth) EnsureTokenConfigured() {
 	if !a.IsConfigured() {
 		fmt.Fprintln(os.Stderr, "Error: access token is required. Use --token or -t to set it.")

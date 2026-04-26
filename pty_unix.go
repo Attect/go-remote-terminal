@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -109,8 +110,12 @@ func (p *UnixPtyProcess) Close() error {
 		}
 	}
 	if p.cmd != nil && p.cmd.Process != nil {
-		// 发送SIGTERM尝试优雅关闭，然后SIGKILL强制关闭
 		_ = p.cmd.Process.Signal(syscall.SIGTERM)
+		// 异步SIGKILL兜底，防止进程忽略SIGTERM而残留
+		go func(proc *os.Process) {
+			time.Sleep(3 * time.Second)
+			_ = proc.Kill()
+		}(p.cmd.Process)
 	}
 	return firstErr
 }

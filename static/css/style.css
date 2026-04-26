@@ -433,10 +433,15 @@ ul {
     flex: 1;
     padding: 4px;
     overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .terminal-wrapper .xterm {
     height: 100%;
+    width: 100%;
 }
 
 /* 终端容器必须有明确尺寸，fit插件才能正确计算 */
@@ -445,8 +450,185 @@ ul {
     height: 100%;
 }
 
-.terminal-wrapper .xterm-viewport {
+/* 确保 xterm.js viewport 可滚动 */
+.terminal-wrapper .xterm-viewport,
+.xterm .xterm-viewport {
     overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+/* 共享信息横幅 */
+.sharing-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(15, 52, 96, 0.6);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.sharing-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+}
+
+.sharing-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    animation: pulse 2s infinite;
+}
+
+.sharing-names {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.sharing-name {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+/* 焦点提示 */
+.focus-hint {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(233, 69, 96, 0.15);
+    border-bottom: 1px solid rgba(233, 69, 96, 0.3);
+    font-size: 12px;
+    color: var(--danger);
+    flex-shrink: 0;
+}
+
+/* 连接数徽标 */
+.conn-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: var(--bg-tertiary);
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-left: 6px;
+}
+
+/* 快捷命令抽屉 */
+.quick-cmd-panel {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    width: 320px;
+    max-height: 50vh;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    border-top: 1px solid var(--border-color);
+    border-radius: 12px 0 0 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    box-shadow: -4px 0 16px rgba(0,0,0,0.3);
+}
+
+.quick-cmd-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.quick-cmd-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.quick-cmd-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: var(--bg-primary);
+    border-radius: var(--radius);
+    font-size: 12px;
+    font-family: monospace;
+}
+
+.quick-cmd-text {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.quick-cmd-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.quick-cmd-btn {
+    padding: 4px 10px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--accent);
+    transition: background var(--transition);
+}
+
+.quick-cmd-btn:hover {
+    background: var(--accent);
+    color: #000;
+}
+
+.quick-cmd-btn.del {
+    color: var(--danger);
+    background: rgba(233, 69, 96, 0.1);
+}
+
+.quick-cmd-btn.del:hover {
+    background: var(--danger);
+    color: #fff;
+}
+
+.quick-cmd-add {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.quick-cmd-add input {
+    flex: 1;
+    padding: 8px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-size: 12px;
 }
 
 /* 连接状态提示 */
@@ -537,6 +719,12 @@ ul {
 .vk-key.vk-modifier.modifier-active {
     background: var(--bg-key-active);
     border-color: var(--bg-key-active);
+    color: #fff;
+}
+
+.vk-key.vk-modifier.modifier-locked {
+    background: var(--danger);
+    border-color: var(--danger);
     color: #fff;
 }
 

@@ -8,9 +8,10 @@ import (
 
 // Config 应用配置
 type Config struct {
-	Host  string // 监听地址，默认 "0.0.0.0"
-	Port  int    // 监听端口，默认 8080
-	Token string // 访问令牌，必需
+	Host          string // 监听地址，默认 "0.0.0.0"
+	Port          int    // 监听端口，默认 8080
+	Token         string // 管理令牌，必需（完整权限）
+	ReadOnlyToken string // 只读令牌，可选（仅接收输出，不能输入/管理）
 }
 
 // ParseConfig 解析配置
@@ -21,8 +22,9 @@ func ParseConfig() *Config {
 	// 定义命令行参数
 	flag.StringVar(&cfg.Host, "host", "", "listen address (default 0.0.0.0)")
 	flag.IntVar(&cfg.Port, "port", 0, "listen port (default 8080)")
-	flag.StringVar(&cfg.Token, "token", "", "access token (required)")
-	flag.StringVar(&cfg.Token, "t", "", "access token (shorthand)")
+	flag.StringVar(&cfg.Token, "token", "", "admin access token (required)")
+	flag.StringVar(&cfg.Token, "t", "", "admin access token (shorthand)")
+	flag.StringVar(&cfg.ReadOnlyToken, "ro-token", "", "read-only access token (optional)")
 
 	// 自定义usage信息
 	flag.Usage = func() {
@@ -54,6 +56,9 @@ func ParseConfig() *Config {
 	}
 	if cfg.Token == "" {
 		cfg.Token = os.Getenv("GRT_TOKEN")
+	}
+	if cfg.ReadOnlyToken == "" {
+		cfg.ReadOnlyToken = os.Getenv("GRT_RO_TOKEN")
 	}
 
 	// 设置默认值

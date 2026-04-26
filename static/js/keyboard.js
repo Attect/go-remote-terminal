@@ -6,8 +6,15 @@ const Keyboard = {
     visible: false,
     isMobileDevice: false,
 
-    // 修饰键状态: 'ctrl' | 'alt'
+    // 修饰键状态: 'Ctrl' | 'Alt' | 'Shift'
     activeModifiers: new Set(),
+
+    // 长按锁定状态
+    lockedModifiers: new Set(),
+
+    // 长按检测定时器
+    _longPressTimer: null,
+    _longPressThreshold: 500, // 毫秒
 
     // 修饰键对应的xterm转义序列前缀
     modifierMap: {
@@ -36,20 +43,58 @@ const Keyboard = {
         vkKeys.forEach(btn => {
             const key = btn.dataset.key;
 
+            // 长按检测
+            const startLongPress = (e) => {
+                if (this._longPressTimer) clearTimeout(this._longPressTimer);
+                this._longPressTimer = setTimeout(() => {
+                    this.handleLongPress(key, btn);
+                }, this._longPressThreshold);
+            };
+
+            const cancelLongPress = () => {
+                if (this._longPressTimer) {
+                    clearTimeout(this._longPressTimer);
+                    this._longPressTimer = null;
+                }
+            };
+
             // 使用touchstart/click处理，防止iOS延迟
             btn.addEventListener('touchstart', (e) => {
                 e.preventDefault();
+                startLongPress(e);
                 this.handleKey(key, btn);
             });
+            btn.addEventListener('touchend', cancelLongPress);
+            btn.addEventListener('touchcancel', cancelLongPress);
 
             btn.addEventListener('mousedown', (e) => {
                 e.preventDefault();
+                startLongPress(e);
                 this.handleKey(key, btn);
             });
+            btn.addEventListener('mouseup', cancelLongPress);
+            btn.addEventListener('mouseleave', cancelLongPress);
         });
 
         // 移动端默认不显示虚拟键盘，由用户切换
         // 但如果是移动设备，显示键盘切换按钮
+    },
+
+    /**
+     * 处理长按事件（锁定修饰键）
+     */
+    handleLongPress(key, btn) {
+        if (key === 'Ctrl' || key === 'Alt' || key === 'Shift') {
+            if (this.lockedModifiers.has(key)) {
+                this.lockedModifiers.delete(key);
+                this.activeModifiers.delete(key);
+            } else {
+                this.lockedModifiers.add(key);
+                this.activeModifiers.add(key);
+            }
+            this._longPressTimer = null;
+            this.updateModifierUI();
+        }
     },
 
     /**
@@ -89,8 +134,14 @@ const Keyboard = {
      */
     handleKey(key, btn) {
         // 修饰键特殊处理
-        if (key === 'Ctrl' || key === 'Alt') {
+        if (key === 'Ctrl' || key === 'Alt' || key === 'Shift') {
             this.handleModifier(key);
+            return;
+        }
+
+        // 粘贴按钮
+        if (key === 'Paste') {
+            App.pasteFromClipboard();
             return;
         }
 
@@ -107,10 +158,18 @@ const Keyboard = {
     },
 
     /**
-     * 处理修饰键切换
-     * @param {string} key - 'Ctrl' 或 'Alt'
+     * 处理修饰键切换（点击切换，长按锁定）
+     * @param {string} key - 'Ctrl' | 'Alt' | 'Shift'
      */
     handleModifier(key) {
+        // 如果已锁定，点击解锁
+        if (this.lockedModifiers.has(key)) {
+            this.lockedModifiers.delete(key);
+            this.activeModifiers.delete(key);
+            this.updateModifierUI();
+            return;
+        }
+        // 普通点击切换
         if (this.activeModifiers.has(key)) {
             this.activeModifiers.delete(key);
         } else {
@@ -120,12 +179,20 @@ const Keyboard = {
     },
 
     /**
+     * 检查是否有激活的修饰键（含锁定）
+     */
+    hasModifier(key) {
+        return this.activeModifiers.has(key) || this.lockedModifiers.has(key);
+    },
+
+    /**
      * 发送组合键
      * @param {string} key - 被修饰的按键
      */
     sendCombination(key) {
-        const hasCtrl = this.activeModifiers.has('Ctrl');
-        const hasAlt = this.activeModifiers.has('Alt');
+        const hasCtrl = this.hasModifier('Ctrl');
+        const hasAlt = this.hasModifier('Alt');
+        const hasShift = this.hasModifier('Shift');
 
         let sequence = '';
 
@@ -184,14 +251,23 @@ const Keyboard = {
             } else if (hasAlt && !hasCtrl) {
                 sequence = '\x1b' + key;
             }
+
+            // Shift处理：对于字母键，转换为大写
+            if (hasShift && !hasCtrl && !hasAlt && key.length === 1) {
+                sequence = key.toUpperCase();
+            }
         }
 
         if (sequence) {
             App.sendInput(sequence);
         }
 
-        // 发送组合键后释放修饰键状态
-        this.activeModifiers.clear();
+        // 发送组合键后释放非锁定的修饰键状态
+        this.activeModifiers.forEach(k => {
+            if (!this.lockedModifiers.has(k)) {
+                this.activeModifiers.delete(k);
+            }
+        });
         this.updateModifierUI();
     },
 
@@ -202,10 +278,11 @@ const Keyboard = {
         const modifierBtns = document.querySelectorAll('.vk-modifier');
         modifierBtns.forEach(btn => {
             const key = btn.dataset.key;
-            if (this.activeModifiers.has(key)) {
+            btn.classList.remove('modifier-active', 'modifier-locked');
+            if (this.lockedModifiers.has(key)) {
+                btn.classList.add('modifier-locked');
+            } else if (this.activeModifiers.has(key)) {
                 btn.classList.add('modifier-active');
-            } else {
-                btn.classList.remove('modifier-active');
             }
         });
     }

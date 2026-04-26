@@ -11,33 +11,28 @@ import (
 
 // ==================== API响应结构 ====================
 
-// APIResponse 统一API响应格式
 type APIResponse struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data"`
 }
 
-// SessionDTO 会话数据传输对象
 type SessionDTO struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Status    string `json:"status"`
 	CreatedAt int64  `json:"created_at"`
+	ConnCount int    `json:"conn_count"`
 }
 
-// CreateSessionRequest 创建会话请求
 type CreateSessionRequest struct {
 	Name  *string `json:"name"`
 	Shell *string `json:"shell"`
 }
 
-// RenameSessionRequest 重命名会话请求
 type RenameSessionRequest struct {
 	Name string `json:"name"`
 }
-
-// ==================== 业务状态码 ====================
 
 const (
 	CodeSuccess       = 0
@@ -50,14 +45,12 @@ const (
 
 // ==================== Handler ====================
 
-// Handler HTTP/WebSocket处理器
 type Handler struct {
 	pool      *SessionPool
 	tokenAuth *TokenAuth
 	upgrader  websocket.Upgrader
 }
 
-// NewHandler 创建处理器
 func NewHandler(pool *SessionPool, tokenAuth *TokenAuth) *Handler {
 	return &Handler{
 		pool:      pool,
@@ -72,7 +65,6 @@ func NewHandler(pool *SessionPool, tokenAuth *TokenAuth) *Handler {
 	}
 }
 
-// RegisterRoutes 注册所有路由到Gin引擎
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	api := r.Group("/api")
 	api.Use(h.tokenAuth.GinMiddleware())
@@ -86,7 +78,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	r.GET("/ws", h.HandleWebSocket)
 }
 
-// HandleSessions GET /api/sessions
 func (h *Handler) HandleSessions(c *gin.Context) {
 	sessions := h.pool.List()
 	dtos := make([]SessionDTO, 0, len(sessions))
@@ -98,6 +89,7 @@ func (h *Handler) HandleSessions(c *gin.Context) {
 			Name:      s.Name,
 			Status:    string(s.Status),
 			CreatedAt: s.CreatedAt.Unix(),
+			ConnCount: len(s.conns),
 		})
 		s.mu.Unlock()
 	}
@@ -109,7 +101,6 @@ func (h *Handler) HandleSessions(c *gin.Context) {
 	})
 }
 
-// HandleCreateSession POST /api/sessions
 func (h *Handler) HandleCreateSession(c *gin.Context) {
 	var req CreateSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -155,6 +146,7 @@ func (h *Handler) HandleCreateSession(c *gin.Context) {
 		Name:      session.Name,
 		Status:    string(session.Status),
 		CreatedAt: session.CreatedAt.Unix(),
+		ConnCount: len(session.conns),
 	}
 	session.mu.Unlock()
 
@@ -165,7 +157,6 @@ func (h *Handler) HandleCreateSession(c *gin.Context) {
 	})
 }
 
-// HandleCloseSession DELETE /api/sessions/:id
 func (h *Handler) HandleCloseSession(c *gin.Context) {
 	id := c.Param("id")
 
@@ -193,7 +184,6 @@ func (h *Handler) HandleCloseSession(c *gin.Context) {
 	})
 }
 
-// HandleRenameSession PUT /api/sessions/:id/rename
 func (h *Handler) HandleRenameSession(c *gin.Context) {
 	id := c.Param("id")
 
@@ -243,6 +233,7 @@ func (h *Handler) HandleRenameSession(c *gin.Context) {
 		Name:      session.Name,
 		Status:    string(session.Status),
 		CreatedAt: session.CreatedAt.Unix(),
+		ConnCount: len(session.conns),
 	}
 	session.mu.Unlock()
 
@@ -254,12 +245,8 @@ func (h *Handler) HandleRenameSession(c *gin.Context) {
 }
 
 // HandleWebSocket GET /ws
-// query参数: token(必需), session_id(可选，用于加入已有会话)
+// 先升级连接，客户端首条消息必须是 auth
 func (h *Handler) HandleWebSocket(c *gin.Context) {
-	if !h.tokenAuth.ValidateOrAbort(c) {
-		return
-	}
-
 	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("[WebSocket] upgrade failed: %v", err)
@@ -267,12 +254,50 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 	}
 
 	ws := NewWSConn(conn)
-	sessionID := c.Query("session_id")
 
+	// 等待认证消息（5秒超时）
+	if err := ws.conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		_ = ws.Close()
+		return
+	}
+
+	_, raw, err := ws.ReadMessage()
+	if err != nil {
+		log.Printf("[WebSocket] auth read failed: %v", err)
+		_ = ws.Close()
+		return
+	}
+
+	// 重置读取超时
+	_ = ws.conn.SetReadDeadline(time.Time{})
+
+	msg, err := ParseV1Message(raw)
+	if err != nil || msg.Type != MsgAuth {
+		_ = ws.WriteJSON(NewErrorMessage("AUTH_REQUIRED", "first message must be auth"))
+		_ = ws.Close()
+		return
+	}
+
+	authPayload, ok := msg.GetAuth()
+	if !ok {
+		_ = ws.WriteJSON(NewErrorMessage("AUTH_REQUIRED", "invalid auth payload"))
+		_ = ws.Close()
+		return
+	}
+
+	result := h.tokenAuth.Validate(authPayload.Token)
+	if result == ValidateInvalid {
+		_ = ws.WriteJSON(NewErrorMessage("UNAUTHORIZED", "invalid token"))
+		_ = ws.Close()
+		return
+	}
+
+	readOnly := result == ValidateReadOnly
+
+	sessionID := authPayload.SessionID
 	var session *Session
 
 	if sessionID != "" {
-		// 加入已有会话
 		var found bool
 		session, found = h.pool.Get(sessionID)
 		if !found {
@@ -289,9 +314,7 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 			return
 		}
 		session.mu.Unlock()
-
 	} else {
-		// 创建新会话
 		session, err = h.pool.Create("", "")
 		if err != nil {
 			_ = ws.WriteJSON(NewErrorMessage("SESSION_CREATE_FAILED", err.Error()))
@@ -300,30 +323,41 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		}
 	}
 
-	// 立即注册连接到会话（默认尺寸24x80），确保不丢失任何PTY输出
-	session.AddConn(ws, 24, 80)
+	// 注册连接
+	session.AddConn(ws, 24, 80, readOnly)
 
-	// 发送会话信息（客户端需要先收到此消息才能正确处理后续输出）
-	_ = ws.WriteJSON(NewSessionInfoMessage(session))
+	// 发送会话信息
+	_ = ws.WriteJSON(NewSessionInfoMessage(session, ws, readOnly))
 
-	// 发送缓冲区内容（重连/加入时回显已有输出）
+	// 发送缓冲区内容（Binary Frame）
 	if output := session.GetOutput(); len(output) > 0 {
-		_ = ws.WriteJSON(NewOutputMessage(output))
+		_ = ws.WriteMessage(websocket.BinaryMessage, EncodeBinaryFrame(BinaryTypeOutput, output))
 	}
 
-	log.Printf("[WebSocket] connected to session %s", session.ID)
+	// 广播连接者列表和焦点状态
+	session.BroadcastConnList()
+	if session.FocusConn == ws {
+		session.BroadcastFocusChange()
+	}
+
+	log.Printf("[WebSocket] connected to session %s (readOnly=%v)", session.ID, readOnly)
+
+	// 创建速率限制器
+	rateLimiter := NewTokenBucket(100*1024, 500*1024)
 
 	// 进入消息读取循环
-	h.handleWSMessages(ws, session)
+	h.handleWSMessages(ws, session, readOnly, rateLimiter)
 }
 
-// handleWSMessages 处理WebSocket消息循环
-func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
+func (h *Handler) handleWSMessages(ws *WSConn, session *Session, readOnly bool, rateLimiter *TokenBucket) {
 	defer func() {
-		// 断开时从会话移除连接，通知其他连接PTY尺寸可能变更
 		newPtyRows, newPtyCols, shouldNotify := session.RemoveConn(ws)
 		if shouldNotify {
 			session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
+		}
+		session.BroadcastConnList()
+		if session.FocusConn == nil || session.FocusConn == ws {
+			session.BroadcastFocusChange()
 		}
 		_ = ws.Close()
 		log.Printf("[WebSocket] disconnected from session %s", session.ID)
@@ -337,7 +371,7 @@ func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
 	})
 
 	for {
-		_, message, err := ws.ReadMessage()
+		msgType, raw, err := ws.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				log.Printf("[WebSocket] unexpected close for session %s: %v", session.ID, err)
@@ -345,52 +379,91 @@ func (h *Handler) handleWSMessages(ws *WSConn, session *Session) {
 			return
 		}
 
-		msg, err := ParseMessage(message)
+		// Binary Frame: 仅用于 input
+		if msgType == websocket.BinaryMessage {
+			bType, data, decodeErr := DecodeBinaryFrame(raw)
+			if decodeErr != nil {
+				log.Printf("[WebSocket] invalid binary frame from session %s: %v", session.ID, decodeErr)
+				continue
+			}
+			if bType == BinaryTypeInput {
+				h.handleInput(ws, session, readOnly, rateLimiter, data)
+			}
+			continue
+		}
+
+		// Text Frame: JSON 消息
+		vmsg, err := ParseV1Message(raw)
 		if err != nil {
 			log.Printf("[WebSocket] invalid message from session %s: %v", session.ID, err)
 			continue
 		}
 
-		switch msg.Type {
-		case MsgInput:
-			h.handleInput(session, msg)
+		switch vmsg.Type {
 		case MsgResize:
-			h.handleResize(ws, session, msg)
+			h.handleResize(ws, session, vmsg)
 		case MsgPing:
 			_ = ws.WriteJSON(NewPongMessage())
 			ws.conn.SetReadDeadline(time.Now().Add(readTimeout))
+		case MsgTakeFocus:
+			h.handleTakeFocus(ws, session)
+		case MsgReleaseFocus:
+			h.handleReleaseFocus(ws, session)
 		default:
-			log.Printf("[WebSocket] unknown message type %q from session %s", msg.Type, session.ID)
+			log.Printf("[WebSocket] unknown message type %q from session %s", vmsg.Type, session.ID)
 		}
 	}
 }
 
-// handleInput 处理终端输入消息
-func (h *Handler) handleInput(session *Session, msg *WSMessage) {
-	data, err := msg.DecodeData()
-	if err != nil {
-		log.Printf("[WebSocket] failed to decode input for session %s: %v", session.ID, err)
+func (h *Handler) handleInput(ws *WSConn, session *Session, readOnly bool, rateLimiter *TokenBucket, data []byte) {
+	if len(data) == 0 {
 		return
 	}
-
-	if len(data) > 0 && session.Pty != nil {
+	if readOnly {
+		_ = ws.WriteJSON(NewErrorMessage("READ_ONLY", "this connection is read-only"))
+		return
+	}
+	if !session.CanInput(ws) {
+		_ = ws.WriteJSON(NewErrorMessage("NO_FOCUS", "you do not have input focus"))
+		return
+	}
+	if !rateLimiter.Allow(len(data)) {
+		log.Printf("[WebSocket] rate limit exceeded for session %s", session.ID)
+		_ = ws.WriteJSON(NewErrorMessage("RATE_LIMITED", "input rate limit exceeded"))
+		_ = ws.Close()
+		return
+	}
+	if session.Pty != nil {
 		if _, err := session.Pty.Write(data); err != nil {
 			log.Printf("[WebSocket] failed to write to PTY for session %s: %v", session.ID, err)
 		}
 	}
 }
 
-// handleResize 处理终端尺寸变更消息
-// 连接已在HandleWebSocket中注册，此处仅更新尺寸
-func (h *Handler) handleResize(ws *WSConn, session *Session, msg *WSMessage) {
-	rows, cols, err := msg.GetResize()
-	if err != nil {
-		log.Printf("[WebSocket] invalid resize for session %s: %v", session.ID, err)
+func (h *Handler) handleResize(ws *WSConn, session *Session, vmsg *V1Message) {
+	payload, ok := vmsg.GetResize()
+	if !ok {
+		log.Printf("[WebSocket] invalid resize for session %s", session.ID)
 		return
 	}
 
-	newPtyRows, newPtyCols, ptyChanged := session.UpdateConnSize(ws, rows, cols)
+	newPtyRows, newPtyCols, ptyChanged := session.UpdateConnSize(ws, payload.Rows, payload.Cols)
 	if ptyChanged {
 		session.BroadcastMessage(NewPtyResizeMessage(newPtyRows, newPtyCols))
 	}
+}
+
+func (h *Handler) handleTakeFocus(ws *WSConn, session *Session) {
+	if session.TakeFocus(ws) {
+		session.BroadcastFocusChange()
+		session.broadcastSessionInfo()
+	} else {
+		_ = ws.WriteJSON(NewErrorMessage("FOCUS_DENIED", "unable to take focus"))
+	}
+}
+
+func (h *Handler) handleReleaseFocus(ws *WSConn, session *Session) {
+	session.ReleaseFocus(ws)
+	session.BroadcastFocusChange()
+	session.broadcastSessionInfo()
 }
