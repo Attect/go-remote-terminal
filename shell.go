@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 )
 
@@ -46,41 +47,27 @@ func DetectShellWithOverride(shellPath string) (*ShellConfig, error) {
 }
 
 // detectWindowsShell 检测Windows Shell
-// 优先使用PowerShell，失败回退到cmd.exe
+// 优先使用PowerShell 7 (pwsh)，其次Windows PowerShell，失败回退到cmd.exe
 // 启动时自动设置UTF-8编码，解决中文乱码问题
 func detectWindowsShell() *ShellConfig {
-	// 尝试PowerShell
-	// 使用 -NoExit -Command 方式启动，先设置UTF-8编码再进入交互模式
-	psPath, err := exec.LookPath("powershell.exe")
-	if err == nil {
-		return &ShellConfig{
-			Path: psPath,
-			Args: []string{
-				"-NoLogo",
-				"-ExecutionPolicy", "Bypass",
-				"-NoExit",
-				"-Command",
-				"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
-					"$OutputEncoding = [System.Text.Encoding]::UTF8; " +
-					"[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
-			},
-		}
+	// PowerShell 7 的默认安装路径
+	ps7DefaultPath := filepath.Join(os.Getenv("ProgramFiles"), "PowerShell", "7", "pwsh.exe")
+
+	// 尝试PowerShell 7的默认安装路径
+	if _, err := os.Stat(ps7DefaultPath); err == nil {
+		return newPowerShellConfig(ps7DefaultPath)
 	}
 
-	// 尝试pwsh (PowerShell Core)
+	// 尝试PATH中的pwsh (PowerShell Core / PowerShell 7)
 	pwshPath, err := exec.LookPath("pwsh.exe")
 	if err == nil {
-		return &ShellConfig{
-			Path: pwshPath,
-			Args: []string{
-				"-NoLogo",
-				"-NoExit",
-				"-Command",
-				"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
-					"$OutputEncoding = [System.Text.Encoding]::UTF8; " +
-					"[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
-			},
-		}
+		return newPowerShellConfig(pwshPath)
+	}
+
+	// 尝试Windows PowerShell (系统自带)
+	psPath, err := exec.LookPath("powershell.exe")
+	if err == nil {
+		return newPowerShellConfig(psPath)
 	}
 
 	// 回退到cmd.exe，使用 /k chcp 65001 设置UTF-8代码页
@@ -96,6 +83,23 @@ func detectWindowsShell() *ShellConfig {
 	return &ShellConfig{
 		Path: "cmd.exe",
 		Args: []string{"/k", "chcp", "65001"},
+	}
+}
+
+// newPowerShellConfig 创建PowerShell配置
+// 自动设置UTF-8编码，解决中文乱码问题
+func newPowerShellConfig(path string) *ShellConfig {
+	return &ShellConfig{
+		Path: path,
+		Args: []string{
+			"-NoLogo",
+			"-ExecutionPolicy", "Bypass",
+			"-NoExit",
+			"-Command",
+			"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
+				"$OutputEncoding = [System.Text.Encoding]::UTF8; " +
+				"[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+		},
 	}
 }
 
