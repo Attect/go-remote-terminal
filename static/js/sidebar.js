@@ -194,10 +194,8 @@ const Sidebar = {
         // 清空终端内容，准备加载新会话的输出
         TermMgr.clear();
 
-        // 先fit确保终端尺寸与容器匹配，避免连接后尺寸不一致
-        TermMgr.fit();
-
         // 连接到目标会话，connect内部会处理旧连接清理
+        // onopen时会自动fit并发送正确尺寸给服务端
         App.currentSessionId = sessionId;
         App.connect(sessionId);
 

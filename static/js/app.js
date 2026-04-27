@@ -201,13 +201,19 @@ const App = {
         }
 
         this.ws.onopen = () => {
-            // 发送认证消息
+            // 确保终端尺寸与容器匹配后再发送认证
+            TermMgr.fit();
+            const rows = TermMgr.getRows();
+            const cols = TermMgr.getCols();
+            // 发送认证消息（附带终端尺寸，服务端以此作为初始PTY尺寸）
             const authMsg = {
                 v: 1,
                 type: 'auth',
                 payload: {
                     token: this.token,
-                    session_id: sessionId || ''
+                    session_id: sessionId || '',
+                    rows: rows,
+                    cols: cols
                 }
             };
             this.ws.send(JSON.stringify(authMsg));
@@ -320,11 +326,8 @@ const App = {
                 this._updateSharingBanner(p.conns);
             }
         }
-        // 先用服务端PTY尺寸初始化终端，避免历史输出排版错乱
-        if (p.rows > 0 && p.cols > 0) {
-            TermMgr.resizeToPtySize(p.rows, p.cols);
-        }
-        // 再根据容器实际尺寸fit并同步给服务端
+        // 服务端AddConn时已使用客户端初始尺寸，这里只需fit到容器实际大小
+        // 并同步给服务端，由服务端统一计算最小PTY尺寸后广播
         TermMgr.fit();
         this.sendResize(TermMgr.getRows(), TermMgr.getCols());
 

@@ -59,6 +59,8 @@ func (m V1Message) MarshalJSON() ([]byte, error) {
 type AuthPayload struct {
 	Token     string `json:"token"`               // 访问令牌
 	SessionID string `json:"session_id,omitempty"` // 期望加入的会话ID
+	Rows      uint16 `json:"rows,omitempty"`      // 客户端终端行数
+	Cols      uint16 `json:"cols,omitempty"`      // 客户端终端列数
 }
 
 // ResizePayload 尺寸变更

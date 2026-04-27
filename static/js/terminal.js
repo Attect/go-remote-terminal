@@ -149,6 +149,15 @@ const TermMgr = {
             }
         }
 
+        // 监听页面可见性变化，切回时强制刷新渲染（修复标签页切换后终端破碎）
+        this._visibilityHandler = () => {
+            if (document.visibilityState === 'visible' && this.term) {
+                // 强制刷新整个终端视口
+                this.term.refresh(0, this.term.rows - 1);
+            }
+        };
+        document.addEventListener('visibilitychange', this._visibilityHandler);
+
         return this.term;
     },
 
@@ -265,6 +274,10 @@ const TermMgr = {
         if (this._resizeObserver) {
             this._resizeObserver.disconnect();
             this._resizeObserver = null;
+        }
+        if (this._visibilityHandler) {
+            document.removeEventListener('visibilitychange', this._visibilityHandler);
+            this._visibilityHandler = null;
         }
         if (this.term) {
             this.term.dispose();

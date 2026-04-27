@@ -323,8 +323,16 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		}
 	}
 
+	// 使用客户端提供的初始尺寸，未提供则回退到默认值
+	initRows := authPayload.Rows
+	initCols := authPayload.Cols
+	if initRows == 0 || initCols == 0 {
+		initRows = 24
+		initCols = 80
+	}
+
 	// 注册连接
-	session.AddConn(ws, 24, 80, readOnly)
+	session.AddConn(ws, initRows, initCols, readOnly)
 
 	// 发送会话信息
 	_ = ws.WriteJSON(NewSessionInfoMessage(session, ws, readOnly))
