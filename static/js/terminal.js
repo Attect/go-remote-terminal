@@ -84,7 +84,7 @@ const TermMgr = {
             this.term.loadAddon(this.searchAddon);
         }
 
-        // 绑定自定义快捷键：Ctrl+Shift+F 搜索，Ctrl+Shift+C 复制
+        // 绑定自定义快捷键：Ctrl+Shift+F 搜索，Ctrl+Shift+C 复制，Ctrl+Shift+M 重置鼠标跟踪
         this.term.attachCustomKeyEventHandler((e) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'F') {
                 e.preventDefault();
@@ -96,6 +96,12 @@ const TermMgr = {
             if (e.ctrlKey && e.shiftKey && e.key === 'C') {
                 e.preventDefault();
                 App.copySelection();
+                return false;
+            }
+            if (e.ctrlKey && e.shiftKey && e.key === 'M') {
+                e.preventDefault();
+                this.resetMouseTracking();
+                App.showToast('鼠标跟踪已重置', 'success');
                 return false;
             }
             // 允许 xterm.js 默认的选中复制和右键菜单
@@ -351,5 +357,18 @@ const TermMgr = {
      */
     adjustFontSize(delta) {
         this.setFontSize(this._fontSize + delta);
+    },
+
+    /**
+     * 重置鼠标跟踪模式
+     * 当远程程序异常退出导致鼠标模式未关闭时，发送ANSI序列强制关闭
+     */
+    resetMouseTracking() {
+        if (this.term) {
+            // 关闭所有xterm鼠标跟踪模式：
+            // 1000=普通鼠标报告, 1002=按钮事件跟踪, 1003=所有事件跟踪(含移动)
+            // 1006=SGR扩展格式, 1015=URXVT格式
+            this.term.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l');
+        }
     }
 };

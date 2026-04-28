@@ -165,6 +165,13 @@ const Keyboard = {
             return;
         }
 
+        // 重置鼠标跟踪
+        if (key === 'ResetMouse') {
+            TermMgr.resetMouseTracking();
+            App.showToast('鼠标跟踪已重置', 'success');
+            return;
+        }
+
         // 如果有激活的修饰键，发送组合键
         if (this.activeModifiers.size > 0) {
             this.sendCombination(key);
