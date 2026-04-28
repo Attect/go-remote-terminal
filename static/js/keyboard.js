@@ -4,7 +4,7 @@
  */
 const Keyboard = {
     visible: false,
-    isMobileDevice: false,
+    isMobileDevice: /(android|bb\d+|meego).+mobile|avantgo|bada\/|blackberry|blazer|compal|elaine|fennec|hiptop|iemobile|ip(hone|od)|iris|kindle|lge |maemo|midp|mmp|mobile.+firefox|netfront|opera m(ob|in)i|palm( os)?|phone|p(ixi|re)\/|plucker|pocket|psp|series(4|6)0|symbian|treo|up\.(browser|link)|vodafone|wap|windows ce|xda|xiino|android|ipad|playbook|silk/i.test(navigator.userAgent || navigator.vendor || window.opera),
 
     // 修饰键状态: 'Ctrl' | 'Alt' | 'Shift'
     activeModifiers: new Set(),
@@ -30,18 +30,41 @@ const Keyboard = {
         'ArrowDown': '\x1b[B',
         'ArrowRight': '\x1b[C',
         'ArrowLeft': '\x1b[D',
+        'Home': '\x1b[H',
+        'End': '\x1b[F',
+        'PageUp': '\x1b[5~',
+        'PageDown': '\x1b[6~',
     },
+
+    // 功能键面板状态
+    funcKeysVisible: false,
+
+    // 鼠标模式状态
+    mouseMode: false,
+    _mouseTouchStart: null,
+    _mouseListeners: [],
 
     /**
      * 初始化虚拟键盘
      */
     init() {
-        this.isMobileDevice = this.isMobile();
-
         // 绑定虚拟按键事件
-        const vkKeys = document.querySelectorAll('.vk-key');
-        vkKeys.forEach(btn => {
+        this._bindKeys(document.querySelectorAll('.vk-key'));
+
+        // 绑定功能键面板事件
+        this._bindKeys(document.querySelectorAll('.fk-key'));
+
+        // 移动端默认不显示虚拟键盘，由用户切换
+    },
+
+    /**
+     * 绑定按键事件（支持长按锁定修饰键）
+     * @param {NodeList} buttons - 按键按钮集合
+     */
+    _bindKeys(buttons) {
+        buttons.forEach(btn => {
             const key = btn.dataset.key;
+            if (!key) return;
 
             // 长按检测
             const startLongPress = (e) => {
@@ -63,7 +86,7 @@ const Keyboard = {
                 e.preventDefault();
                 startLongPress(e);
                 this.handleKey(key, btn);
-            });
+            }, { passive: false });
             btn.addEventListener('touchend', cancelLongPress);
             btn.addEventListener('touchcancel', cancelLongPress);
 
@@ -75,9 +98,6 @@ const Keyboard = {
             btn.addEventListener('mouseup', cancelLongPress);
             btn.addEventListener('mouseleave', cancelLongPress);
         });
-
-        // 移动端默认不显示虚拟键盘，由用户切换
-        // 但如果是移动设备，显示键盘切换按钮
     },
 
     /**
@@ -203,7 +223,6 @@ const Keyboard = {
             // Ctrl+方向键: ESC [ 1;5 A
             // Alt+方向键: ESC [ 1;3 A
             if (baseSeq.startsWith('\x1b[')) {
-                const dirChar = baseSeq.slice(-1); // A, B, C, D
                 let modifierCode = 1;
                 if (hasCtrl && hasAlt) {
                     modifierCode = 7; // Ctrl+Alt
@@ -212,7 +231,15 @@ const Keyboard = {
                 } else if (hasAlt) {
                     modifierCode = 3; // Alt
                 }
-                sequence = `\x1b[1;${modifierCode}${dirChar}`;
+                // PageUp/PageDown 格式: ESC [ 5 ~ -> ESC [ 5 ; modifier ~
+                if (baseSeq === '\x1b[5~') {
+                    sequence = `\x1b[5;${modifierCode}~`;
+                } else if (baseSeq === '\x1b[6~') {
+                    sequence = `\x1b[6;${modifierCode}~`;
+                } else {
+                    const dirChar = baseSeq.slice(-1); // A, B, C, D, H, F
+                    sequence = `\x1b[1;${modifierCode}${dirChar}`;
+                }
             } else {
                 // Tab/Esc
                 if (hasAlt) {
@@ -272,11 +299,156 @@ const Keyboard = {
     },
 
     /**
+     * 切换功能键面板显示/隐藏
+     */
+    toggleFuncKeys() {
+        this.funcKeysVisible = !this.funcKeysVisible;
+        const el = document.getElementById('func-keys-panel');
+        if (el) {
+            el.style.display = this.funcKeysVisible ? 'flex' : 'none';
+        }
+        // 同步按钮高亮状态
+        const btn = document.getElementById('btn-func-keys');
+        if (btn) {
+            btn.classList.toggle('toolbar-btn-active', this.funcKeysVisible);
+        }
+    },
+
+    /**
+     * 切换鼠标模式
+     */
+    toggleMouseMode() {
+        this.mouseMode = !this.mouseMode;
+        const container = document.getElementById('terminal-container');
+        if (container) {
+            container.classList.toggle('mouse-mode-active', this.mouseMode);
+        }
+        const btn = document.getElementById('btn-mouse-mode');
+        if (btn) {
+            btn.classList.toggle('toolbar-btn-active', this.mouseMode);
+        }
+
+        if (this.mouseMode) {
+            this._enableMouseMode();
+            App.showToast('鼠标模式已开启：触摸终端发送鼠标事件', 'success');
+        } else {
+            this._disableMouseMode();
+        }
+    },
+
+    /**
+     * 启用鼠标模式：将touch事件转换为mouse事件发送给xterm.js
+     */
+    _enableMouseMode() {
+        const container = document.getElementById('xterm-terminal');
+        if (!container || !TermMgr.term) return;
+
+        // 阻止默认触摸行为（防止滚动）
+        const preventDefault = (e) => {
+            if (this.mouseMode) e.preventDefault();
+        };
+
+        // touchstart -> mousedown
+        const onTouchStart = (e) => {
+            if (!this.mouseMode) return;
+            if (e.touches.length > 1) return; // 允许多指手势（如双指滚动）
+            e.preventDefault();
+            const touch = e.touches[0];
+            this._mouseTouchStart = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+            this._dispatchMouseEvent('mousedown', touch);
+        };
+
+        // touchmove -> mousemove
+        const onTouchMove = (e) => {
+            if (!this.mouseMode) return;
+            if (e.touches.length > 1) return; // 允许多指手势
+            e.preventDefault();
+            const touch = e.touches[0];
+            this._dispatchMouseEvent('mousemove', touch);
+        };
+
+        // touchend -> mouseup + click（如果是短按）
+        const onTouchEnd = (e) => {
+            if (!this.mouseMode) return;
+            const touch = e.changedTouches[0];
+            this._dispatchMouseEvent('mouseup', touch);
+
+            // 判断是否为短按（非滑动），发送click
+            if (this._mouseTouchStart) {
+                const dx = touch.clientX - this._mouseTouchStart.x;
+                const dy = touch.clientY - this._mouseTouchStart.y;
+                const dt = Date.now() - this._mouseTouchStart.time;
+                if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && dt < 300) {
+                    this._dispatchMouseEvent('click', touch);
+                }
+            }
+            this._mouseTouchStart = null;
+        };
+
+        // 滚轮：双指缩放/滑动 -> wheel事件
+        const onWheel = (e) => {
+            if (!this.mouseMode) return;
+            // 在鼠标模式下允许wheel事件自然传播给xterm.js
+        };
+
+        container.addEventListener('touchstart', onTouchStart, { passive: false });
+        container.addEventListener('touchmove', onTouchMove, { passive: false });
+        container.addEventListener('touchend', onTouchEnd, { passive: false });
+        container.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+        this._mouseListeners = [
+            { el: container, type: 'touchstart', fn: onTouchStart },
+            { el: container, type: 'touchmove', fn: onTouchMove },
+            { el: container, type: 'touchend', fn: onTouchEnd },
+            { el: container, type: 'touchcancel', fn: onTouchEnd },
+        ];
+    },
+
+    /**
+     * 禁用鼠标模式
+     */
+    _disableMouseMode() {
+        this._mouseListeners.forEach(item => {
+            item.el.removeEventListener(item.type, item.fn);
+        });
+        this._mouseListeners = [];
+    },
+
+    /**
+     * 将触摸坐标转换为鼠标事件并分发给xterm.js
+     */
+    _dispatchMouseEvent(type, touch) {
+        const container = document.getElementById('xterm-terminal');
+        if (!container) return;
+
+        const rect = container.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        // 创建并分发合成鼠标事件
+        const evt = new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            screenX: touch.screenX,
+            screenY: touch.screenY,
+            button: 0, // 左键
+            buttons: type === 'mouseup' ? 0 : 1,
+        });
+
+        // 分发到xterm.js的底层元素（.xterm-screen或容器本身）
+        const screenEl = container.querySelector('.xterm-screen') || container;
+        screenEl.dispatchEvent(evt);
+    },
+
+    /**
      * 更新修饰键按钮的视觉状态
      */
     updateModifierUI() {
-        const modifierBtns = document.querySelectorAll('.vk-modifier');
-        modifierBtns.forEach(btn => {
+        const allModifierBtns = document.querySelectorAll('.vk-modifier, .fk-modifier');
+        allModifierBtns.forEach(btn => {
             const key = btn.dataset.key;
             btn.classList.remove('modifier-active', 'modifier-locked');
             if (this.lockedModifiers.has(key)) {

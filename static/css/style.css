@@ -244,6 +244,11 @@ ul {
     color: var(--text-primary);
 }
 
+.toolbar-btn-active {
+    background: var(--bg-active) !important;
+    color: var(--accent) !important;
+}
+
 .toolbar-title {
     flex: 1;
     margin-left: 8px;
@@ -526,6 +531,71 @@ ul {
     font-weight: 600;
     color: var(--accent);
     margin-left: 6px;
+}
+
+/* 功能键面板 */
+.func-keys-panel {
+    position: fixed;
+    top: var(--toolbar-height);
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    z-index: 25;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.fk-row {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.fk-key {
+    min-width: 52px;
+    height: 40px;
+    padding: 0 10px;
+    background: var(--bg-key);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background var(--transition), border-color var(--transition);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+}
+
+.fk-key:active {
+    background: var(--bg-tertiary);
+    border-color: var(--accent);
+}
+
+.fk-key.fk-modifier {
+    font-weight: 600;
+}
+
+.fk-key.fk-modifier.modifier-active {
+    background: var(--bg-key-active);
+    border-color: var(--bg-key-active);
+    color: #fff;
+}
+
+.fk-key.fk-modifier.modifier-locked {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
+/* 鼠标模式激活时终端区域样式 */
+.mouse-mode-active #xterm-terminal {
+    cursor: crosshair;
 }
 
 /* 快捷命令抽屉 */

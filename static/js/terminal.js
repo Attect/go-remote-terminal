@@ -21,6 +21,12 @@ const TermMgr = {
     _resizeObserver: null,    // ResizeObserver实例
     searchAddon: null,        // 搜索插件实例
 
+    // 字体大小
+    _fontSize: 14,
+    _minFontSize: 8,
+    _maxFontSize: 20,
+    _fontSizeKey: 'terminal_font_size',
+
     /**
      * 初始化终端
      * @param {HTMLElement} container - 终端容器DOM元素
@@ -30,11 +36,14 @@ const TermMgr = {
             this.dispose();
         }
 
+        // 加载保存的字体大小（移动端默认更小）
+        this._loadFontSize();
+
         // 创建xterm.js实例
         this.term = new XtermTerminal({
             cursorBlink: true,
             cursorStyle: 'bar',
-            fontSize: 14,
+            fontSize: this._fontSize,
             fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", "Source Code Pro", Consolas, monospace',
             theme: {
                 background: '#1a1a2e',
@@ -285,5 +294,62 @@ const TermMgr = {
             this.fitAddon = null;
             this.searchAddon = null;
         }
+    },
+
+    /**
+     * 从localStorage加载字体大小
+     */
+    _loadFontSize() {
+        try {
+            const saved = localStorage.getItem(this._fontSizeKey);
+            if (saved) {
+                const size = parseInt(saved, 10);
+                if (size >= this._minFontSize && size <= this._maxFontSize) {
+                    this._fontSize = size;
+                    return;
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+        // 移动端默认更小字体
+        if (Keyboard.isMobileDevice) {
+            this._fontSize = 11;
+        } else {
+            this._fontSize = 14;
+        }
+    },
+
+    /**
+     * 保存字体大小到localStorage
+     */
+    _saveFontSize() {
+        try {
+            localStorage.setItem(this._fontSizeKey, String(this._fontSize));
+        } catch (e) {
+            // ignore
+        }
+    },
+
+    /**
+     * 设置字体大小
+     * @param {number} size - 字体大小
+     */
+    setFontSize(size) {
+        size = Math.max(this._minFontSize, Math.min(this._maxFontSize, size));
+        this._fontSize = size;
+        if (this.term) {
+            this.term.options.fontSize = size;
+            this.fit();
+        }
+        this._saveFontSize();
+    },
+
+    /**
+     * 调整字体大小
+     * @param {number} delta - 变化量（可为负）
+     */
+    adjustFontSize(delta) {
+        this.setFontSize(this._fontSize + delta);
     }
 };

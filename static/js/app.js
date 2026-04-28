@@ -115,6 +115,36 @@ const App = {
         document.getElementById('btn-quick-cmd').addEventListener('click', () => {
             this.toggleQuickCmdPanel();
         });
+
+        // 字体大小调整
+        const btnFontDec = document.getElementById('btn-font-dec');
+        const btnFontInc = document.getElementById('btn-font-inc');
+        if (btnFontDec) {
+            btnFontDec.addEventListener('click', () => {
+                TermMgr.adjustFontSize(-1);
+            });
+        }
+        if (btnFontInc) {
+            btnFontInc.addEventListener('click', () => {
+                TermMgr.adjustFontSize(1);
+            });
+        }
+
+        // 功能键面板
+        const btnFuncKeys = document.getElementById('btn-func-keys');
+        if (btnFuncKeys) {
+            btnFuncKeys.addEventListener('click', () => {
+                Keyboard.toggleFuncKeys();
+            });
+        }
+
+        // 鼠标模式
+        const btnMouseMode = document.getElementById('btn-mouse-mode');
+        if (btnMouseMode) {
+            btnMouseMode.addEventListener('click', () => {
+                Keyboard.toggleMouseMode();
+            });
+        }
     },
 
     bindFocusEvents() {
