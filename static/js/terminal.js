@@ -359,8 +359,22 @@ const TermMgr = {
         this.setFontSize(this._fontSize + delta);
     },
 
+    // 鼠标跟踪状态（前端记录，用于手动切换）
+    _mouseTrackingEnabled: false,
+
     /**
-     * 重置鼠标跟踪模式
+     * 开启鼠标跟踪模式
+     */
+    enableMouseTracking() {
+        if (this.term) {
+            // 开启所有事件跟踪(1003) + SGR扩展格式(1006)
+            this.term.write('\x1b[?1003h\x1b[?1006h');
+            this._mouseTrackingEnabled = true;
+        }
+    },
+
+    /**
+     * 重置/关闭鼠标跟踪模式
      * 当远程程序异常退出导致鼠标模式未关闭时，发送ANSI序列强制关闭
      */
     resetMouseTracking() {
@@ -369,6 +383,19 @@ const TermMgr = {
             // 1000=普通鼠标报告, 1002=按钮事件跟踪, 1003=所有事件跟踪(含移动)
             // 1006=SGR扩展格式, 1015=URXVT格式
             this.term.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l');
+            this._mouseTrackingEnabled = false;
         }
+    },
+
+    /**
+     * 切换鼠标跟踪模式
+     */
+    toggleMouseTracking() {
+        if (this._mouseTrackingEnabled) {
+            this.resetMouseTracking();
+        } else {
+            this.enableMouseTracking();
+        }
+        return this._mouseTrackingEnabled;
     }
 };

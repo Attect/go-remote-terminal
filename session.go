@@ -416,14 +416,6 @@ func (s *Session) ReleaseFocus(ws *WSConn) {
 	if info, ok := s.conns[ws]; ok {
 		info.Focus = false
 	}
-
-	for w, info := range s.conns {
-		if !info.ReadOnly {
-			s.FocusConn = w
-			info.Focus = true
-			break
-		}
-	}
 }
 
 func (s *Session) CanInput(ws *WSConn) bool {

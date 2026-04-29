@@ -165,10 +165,15 @@ const Keyboard = {
             return;
         }
 
-        // 重置鼠标跟踪
+        // 切换鼠标跟踪模式
         if (key === 'ResetMouse') {
-            TermMgr.resetMouseTracking();
-            App.showToast('鼠标跟踪已重置', 'success');
+            const enabled = TermMgr.toggleMouseTracking();
+            App.showToast(enabled ? '鼠标跟踪已开启' : '鼠标跟踪已关闭', 'success');
+            // 更新按钮视觉状态
+            const btn = document.querySelector('.fk-key[data-key="ResetMouse"]');
+            if (btn) {
+                btn.classList.toggle('mouse-active', enabled);
+            }
             return;
         }
 

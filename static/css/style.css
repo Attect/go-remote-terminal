@@ -593,6 +593,12 @@ ul {
     color: #fff;
 }
 
+.fk-key.mouse-active {
+    background: var(--success);
+    border-color: var(--success);
+    color: #fff;
+}
+
 /* 鼠标模式激活时终端区域样式 */
 .mouse-mode-active #xterm-terminal {
     cursor: crosshair;
