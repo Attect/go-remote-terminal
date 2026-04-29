@@ -464,7 +464,20 @@ const App = {
 
     sendInput(data) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-        if (this._readOnly || !this._focused) return;
+        if (this._readOnly) return;
+
+        // 如果没有焦点，但发送的是紧急信号（Ctrl+C, Ctrl+Z, Ctrl+D, Ctrl+\），
+        // 自动申请焦点后继续发送。WebSocket 消息按顺序处理，take_focus 会先被执行。
+        if (!this._focused) {
+            const urgentSignals = ['\x03', '\x1a', '\x04', '\x1c'];
+            if (urgentSignals.includes(data)) {
+                this.takeFocus();
+                // 继续发送输入，后端会按顺序处理 take_focus 然后 input
+            } else {
+                return;
+            }
+        }
+
         try {
             const encoder = new TextEncoder();
             const bytes = encoder.encode(data);
