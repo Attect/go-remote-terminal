@@ -130,6 +130,14 @@ const App = {
             });
         }
 
+        // 滚动到底部
+        const btnScrollBottom = document.getElementById('btn-scroll-bottom');
+        if (btnScrollBottom) {
+            btnScrollBottom.addEventListener('click', () => {
+                TermMgr.scrollToBottom();
+            });
+        }
+
         // 功能键面板
         const btnFuncKeys = document.getElementById('btn-func-keys');
         if (btnFuncKeys) {

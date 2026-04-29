@@ -407,5 +407,14 @@ const TermMgr = {
             this.enableMouseTracking();
         }
         return this._mouseTrackingEnabled;
+    },
+
+    /**
+     * 滚动到终端底部（最新消息）
+     */
+    scrollToBottom() {
+        if (this.term) {
+            this.term.scrollToBottom();
+        }
     }
 };
