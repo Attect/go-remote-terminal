@@ -84,24 +84,34 @@ const TermMgr = {
             this.term.loadAddon(this.searchAddon);
         }
 
-        // 绑定自定义快捷键：Ctrl+Shift+F 搜索，Ctrl+Shift+C 复制，Ctrl+Shift+M 重置鼠标跟踪
+        // 绑定自定义快捷键
         this.term.attachCustomKeyEventHandler((e) => {
-            if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+            // Ctrl+Shift+F 搜索
+            if (e.ctrlKey && e.shiftKey && e.code === 'KeyF') {
                 e.preventDefault();
                 if (this.searchAddon) {
                     this.searchAddon.findNext('');
                 }
                 return false;
             }
-            if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+            // Ctrl+Shift+C 复制选中内容
+            if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
                 e.preventDefault();
                 App.copySelection();
                 return false;
             }
-            if (e.ctrlKey && e.shiftKey && e.key === 'M') {
+            // Ctrl+Shift+M 重置鼠标跟踪
+            if (e.ctrlKey && e.shiftKey && e.code === 'KeyM') {
                 e.preventDefault();
                 this.resetMouseTracking();
                 App.showToast('鼠标跟踪已重置', 'success');
+                return false;
+            }
+            // Ctrl+C 始终发送 SIGINT (\x03)，不依赖 xterm.js 的默认行为
+            // 默认行为在有选中文本时会执行浏览器复制而非发送 \x03
+            if (e.ctrlKey && !e.shiftKey && e.code === 'KeyC') {
+                e.preventDefault();
+                App.sendInput('\x03');
                 return false;
             }
             // 允许 xterm.js 默认的选中复制和右键菜单
