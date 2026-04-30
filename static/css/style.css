@@ -455,6 +455,14 @@ ul {
     height: 100%;
 }
 
+/* 拖拽文件到终端时的视觉反馈 */
+#xterm-terminal.drag-over,
+#xterm-terminal.drag-over .xterm-screen {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+    background: rgba(0, 212, 255, 0.05);
+}
+
 /* 确保 xterm.js viewport 可滚动 */
 .terminal-wrapper .xterm-viewport,
 .xterm .xterm-viewport {

@@ -126,6 +126,32 @@ const TermMgr = {
             }
         }, { passive: true });
 
+        // 拖拽文件/目录支持：拖入时在当前光标位置插入带引号的完整路径
+        this._dragCounter = 0; // 防止子元素触发导致闪烁
+        container.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            this._dragCounter++;
+            container.classList.add('drag-over');
+        });
+        container.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            this._dragCounter--;
+            if (this._dragCounter <= 0) {
+                this._dragCounter = 0;
+                container.classList.remove('drag-over');
+            }
+        });
+        container.addEventListener('dragover', (e) => {
+            e.preventDefault(); // 必须阻止默认行为才能触发 drop
+            e.dataTransfer.dropEffect = 'copy';
+        });
+        container.addEventListener('drop', (e) => {
+            e.preventDefault();
+            this._dragCounter = 0;
+            container.classList.remove('drag-over');
+            this._handleFileDrop(e);
+        });
+
         // 打开终端
         this.term.open(container);
 
@@ -415,6 +441,52 @@ const TermMgr = {
     scrollToBottom() {
         if (this.term) {
             this.term.scrollToBottom();
+        }
+    },
+
+    /**
+     * 处理文件/目录拖放事件
+     * 尝试从多种数据源获取路径，并发送到终端
+     */
+    _handleFileDrop(e) {
+        if (!this.term) return;
+
+        let path = '';
+
+        // 优先级1: text/uri-list（某些浏览器/操作系统会提供 file:// URI）
+        const uriList = e.dataTransfer.getData('text/uri-list');
+        if (uriList) {
+            const uri = uriList.split('\n')[0].trim();
+            if (uri.startsWith('file://')) {
+                // file:///C:/Users/Attect/file.txt → C:/Users/Attect/file.txt
+                // file:///home/attect/file.txt → /home/attect/file.txt
+                path = decodeURIComponent(uri.slice(7));
+                if (path.startsWith('/')) {
+                    path = path.slice(1);
+                }
+                // Windows 路径将正斜杠统一为反斜杠更自然
+                if (path.length > 1 && path[1] === ':') {
+                    path = path.replace(/\//g, '\\');
+                }
+            }
+        }
+
+        // 优先级2: text/plain（浏览器扩展或某些文件管理器可能提供）
+        if (!path) {
+            path = e.dataTransfer.getData('text/plain').trim();
+        }
+
+        // 优先级3: files[0].name（回退到文件名）
+        if (!path && e.dataTransfer.files.length > 0) {
+            path = e.dataTransfer.files[0].name;
+        }
+
+        if (path) {
+            // 如果路径包含空格或特殊字符，用引号包裹
+            const needQuotes = /[\s'"\\$;&|<>(){}[\]*?~`]/.test(path);
+            const escaped = path.replace(/"/g, '\\"');
+            const quoted = needQuotes ? `"${escaped}"` : escaped;
+            App.sendInput(quoted);
         }
     }
 };
