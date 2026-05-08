@@ -107,6 +107,13 @@ const TermMgr = {
                 App.showToast('鼠标跟踪已重置', 'success');
                 return false;
             }
+            // Ctrl+Shift+R 重置终端状态
+            if (e.ctrlKey && e.shiftKey && e.code === 'KeyR') {
+                e.preventDefault();
+                this.resetTerminalState();
+                App.showToast('终端状态已重置', 'success');
+                return false;
+            }
             // Ctrl+C 始终发送 SIGINT (\x03)，不依赖 xterm.js 的默认行为
             // 默认行为在有选中文本时会执行浏览器复制而非发送 \x03
             if (e.ctrlKey && !e.shiftKey && e.code === 'KeyC') {
@@ -443,6 +450,31 @@ const TermMgr = {
             this.term.scrollToBottom();
         }
     },
+
+    /**
+     * 重置终端状态
+     * 当TUI程序异常退出导致终端模式未恢复时，强制恢复正常状态
+     */
+    resetTerminalState() {
+        if (!this.term) return;
+        // 退出 alternate screen buffer（返回主缓冲区）
+        this.term.write('\x1b[?1049l');
+        // 恢复正常键盘模式（退出 application keypad mode）
+        this.term.write('\x1b>');
+        // 恢复 local echo
+        this.term.write('\x1b[12l');
+        // 关闭鼠标跟踪
+        this.term.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l');
+        // 显示光标
+        this.term.write('\x1b[?25h');
+        // 重置光标样式为默认
+        this.term.write('\x1b[0 q');
+        // 重置所有颜色/属性
+        this.term.write('\x1b[0m');
+        // 滚动到底部确保看到最新内容
+        this.term.scrollToBottom();
+        this._mouseTrackingEnabled = false;
+    }
 
     /**
      * 处理文件/目录拖放事件

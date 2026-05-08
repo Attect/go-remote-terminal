@@ -98,6 +98,10 @@ const App = {
         document.getElementById('btn-export').addEventListener('click', () => {
             Export.exportOutput(TermMgr.term, this.currentSessionName);
         });
+        document.getElementById('btn-reset-term').addEventListener('click', () => {
+            TermMgr.resetTerminalState();
+            this.showToast('终端状态已重置', 'success');
+        });
         document.getElementById('btn-keyboard-toggle').addEventListener('click', () => {
             Keyboard.toggle();
         });
@@ -401,7 +405,12 @@ const App = {
 
         if (p.code === 'SESSION_EXITED') {
             this.showToast('Shell进程已退出', 'error');
+            TermMgr.resetTerminalState();
             Sidebar.refreshSessions();
+            // 自动尝试重新连接到新会话
+            this.currentSessionId = null;
+            this.reconnectAttempts = 0;
+            setTimeout(() => this.connect(), 800);
         } else if (p.code === 'SESSION_CLOSED') {
             this.showToast('会话已被其他用户关闭', 'error');
             this.currentSessionId = null;
