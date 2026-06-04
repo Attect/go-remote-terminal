@@ -1,0 +1,407 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"runtime"
+	"strconv"
+	"strings"
+)
+
+// ==================== MCP Tool 定义 ====================
+
+// MCPTool 表示一个MCP工具
+type MCPTool struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	InputSchema ToolSchema  `json:"inputSchema"`
+}
+
+// ToolSchema JSON Schema for tool input
+type ToolSchema struct {
+	Type       string                 `json:"type"`
+	Properties map[string]ToolProperty `json:"properties"`
+	Required   []string               `json:"required"`
+}
+
+// ToolProperty JSON Schema property
+type ToolProperty struct {
+	Type        string `json:"type,omitempty"`
+	Description string `json:"description,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
+}
+
+// ToolResult 工具调用结果
+type ToolResult struct {
+	Content []ToolContent `json:"content"`
+	IsError bool          `json:"isError,omitempty"`
+}
+
+// ToolContent 结果内容项
+type ToolContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func textResult(text string) ToolResult {
+	return ToolResult{
+		Content: []ToolContent{{Type: "text", Text: text}},
+	}
+}
+
+func errorResult(errMsg string) ToolResult {
+	return ToolResult{
+		Content: []ToolContent{{Type: "text", Text: errMsg}},
+		IsError: true,
+	}
+}
+
+// AllMCPTools 返回所有可用的MCP工具定义
+func AllMCPTools() []MCPTool {
+	return []MCPTool{
+		{
+			Name:        "terminal_environment_info",
+			Description: "获取当前运行环境的基础信息，包括默认shell路径、操作系统、架构等",
+			InputSchema: ToolSchema{
+				Type:       "object",
+				Properties: map[string]ToolProperty{},
+				Required:   []string{},
+			},
+		},
+		{
+			Name:        "terminal_create",
+			Description: "创建一个新的终端会话。创建的终端可被前端页面查看和操作，Agent始终可直接操作。终端尺寸固定，不随页面查看尺寸变化。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"name":    {Type: "string", Description: "终端名称（可选，默认自动生成）"},
+					"opener":  {Type: "string", Description: "打开者名称（如AI Agent名称）"},
+					"purpose": {Type: "string", Description: "打开目的/用途描述"},
+					"rows":    {Type: "integer", Description: "终端行数（可选，默认120）", Default: 120},
+					"cols":    {Type: "integer", Description: "终端列数（可选，默认40）", Default: 40},
+				},
+				Required: []string{"opener", "purpose"},
+			},
+		},
+		{
+			Name:        "terminal_list",
+			Description: "查询当前已启用的所有终端会话列表",
+			InputSchema: ToolSchema{
+				Type:       "object",
+				Properties: map[string]ToolProperty{},
+				Required:   []string{},
+			},
+		},
+		{
+			Name:        "terminal_send_input",
+			Description: "向指定终端发送输入。支持文本输入和键盘模拟输入（方向键、Ctrl、Alt、Esc等），可用于操作TUI程序。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"session_id": {Type: "string", Description: "终端会话ID"},
+					"input_type": {Type: "string", Description: "输入类型: text 或 key", Enum: []string{"text", "key"}},
+					"data":       {Type: "string", Description: "输入内容。text类型时直接发送文本；key类型时填写键名如 Enter, ArrowUp, Ctrl+C, Escape 等"},
+				},
+				Required: []string{"session_id", "input_type", "data"},
+			},
+		},
+		{
+			Name:        "terminal_get_output",
+			Description: "获取指定终端的最后N行输出内容。自动去除ANSI色彩控制符，避免干扰Agent理解。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"session_id": {Type: "string", Description: "终端会话ID"},
+					"lines":      {Type: "integer", Description: "获取行数（可选，默认50）", Default: 50},
+				},
+				Required: []string{"session_id"},
+			},
+		},
+		{
+			Name:        "terminal_get_screen",
+			Description: "获取指定终端当前可见屏幕的渲染内容。适用于TUI程序（如top/htop/vim等），自动去除ANSI色彩控制符。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"session_id": {Type: "string", Description: "终端会话ID"},
+				},
+				Required: []string{"session_id"},
+			},
+		},
+		{
+			Name:        "terminal_close",
+			Description: "关闭指定的终端会话。Agent使用完毕后应主动关闭终端。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"session_id": {Type: "string", Description: "终端会话ID"},
+				},
+				Required: []string{"session_id"},
+			},
+		},
+		{
+			Name:        "terminal_rename",
+			Description: "重命名指定的终端会话。可在不同流程中更新终端名称以便区分。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"session_id": {Type: "string", Description: "终端会话ID"},
+					"new_name":   {Type: "string", Description: "新名称"},
+				},
+				Required: []string{"session_id", "new_name"},
+			},
+		},
+	}
+}
+
+// ==================== Tool 处理函数 ====================
+
+// HandleMCPTool 分发给具体的工具处理函数
+func HandleMCPTool(pool *SessionPool, name string, args map[string]interface{}) ToolResult {
+	switch name {
+	case "terminal_environment_info":
+		return handleTerminalEnvironmentInfo()
+	case "terminal_create":
+		return handleTerminalCreate(pool, args)
+	case "terminal_list":
+		return handleTerminalList(pool)
+	case "terminal_send_input":
+		return handleTerminalSendInput(pool, args)
+	case "terminal_get_output":
+		return handleTerminalGetOutput(pool, args)
+	case "terminal_get_screen":
+		return handleTerminalGetScreen(pool, args)
+	case "terminal_close":
+		return handleTerminalClose(pool, args)
+	case "terminal_rename":
+		return handleTerminalRename(pool, args)
+	default:
+		return errorResult(fmt.Sprintf("unknown tool: %s", name))
+	}
+}
+
+func handleTerminalEnvironmentInfo() ToolResult {
+	shell := GetDefaultShell()
+	info := fmt.Sprintf("操作系统: %s\n架构: %s\n默认Shell: %s\nShell参数: %v",
+		runtime.GOOS, runtime.GOARCH, shell.Path, shell.Args)
+	return textResult(info)
+}
+
+func handleTerminalCreate(pool *SessionPool, args map[string]interface{}) ToolResult {
+	name := getStringArg(args, "name")
+	opener := getStringArg(args, "opener")
+	purpose := getStringArg(args, "purpose")
+	rows := getIntArg(args, "rows", 120)
+	cols := getIntArg(args, "cols", 40)
+
+	if opener == "" || purpose == "" {
+		return errorResult("opener 和 purpose 是必填参数")
+	}
+
+	session, err := pool.CreateWithMeta(name, "", opener, purpose, uint16(rows), uint16(cols))
+	if err != nil {
+		return errorResult(fmt.Sprintf("创建终端失败: %v", err))
+	}
+
+	result := fmt.Sprintf("终端创建成功\n会话ID: %s\n名称: %s\n打开者: %s\n目的: %s\n尺寸: %dx%d",
+		session.ID, session.Name, session.Opener, session.Purpose, rows, cols)
+	return textResult(result)
+}
+
+func handleTerminalList(pool *SessionPool) ToolResult {
+	sessions := pool.List()
+	if len(sessions) == 0 {
+		return textResult("当前没有已启用的终端")
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("共 %d 个终端:\n\n", len(sessions)))
+	for _, s := range sessions {
+		s.mu.Lock()
+		status := string(s.Status)
+		name := s.Name
+		created := s.CreatedAt.Format("2006-01-02 15:04:05")
+		opener := s.Opener
+		purpose := s.Purpose
+		connCount := len(s.conns)
+		fixed := "动态"
+		if s.FixedRows > 0 && s.FixedCols > 0 {
+			fixed = fmt.Sprintf("%dx%d", s.FixedRows, s.FixedCols)
+		}
+		s.mu.Unlock()
+
+		sb.WriteString(fmt.Sprintf("ID: %s\n", s.ID))
+		sb.WriteString(fmt.Sprintf("  名称: %s\n", name))
+		sb.WriteString(fmt.Sprintf("  状态: %s\n", status))
+		sb.WriteString(fmt.Sprintf("  创建时间: %s\n", created))
+		sb.WriteString(fmt.Sprintf("  打开者: %s\n", opener))
+		sb.WriteString(fmt.Sprintf("  目的: %s\n", purpose))
+		sb.WriteString(fmt.Sprintf("  尺寸: %s\n", fixed))
+		sb.WriteString(fmt.Sprintf("  页面连接数: %d\n", connCount))
+		sb.WriteString("\n")
+	}
+	return textResult(sb.String())
+}
+
+func handleTerminalSendInput(pool *SessionPool, args map[string]interface{}) ToolResult {
+	sessionID := getStringArg(args, "session_id")
+	inputType := getStringArg(args, "input_type")
+	data := getStringArg(args, "data")
+
+	if sessionID == "" {
+		return errorResult("session_id 是必填参数")
+	}
+
+	session, ok := pool.Get(sessionID)
+	if !ok {
+		return errorResult("终端不存在")
+	}
+
+	session.mu.Lock()
+	if session.Status == SessionExited {
+		session.mu.Unlock()
+		return errorResult("终端进程已退出")
+	}
+	session.mu.Unlock()
+
+	var inputData []byte
+	switch inputType {
+	case "text":
+		inputData = []byte(data)
+	case "key":
+		seq, err := ParseKeyInput(data)
+		if err != nil {
+			return errorResult(fmt.Sprintf("按键解析失败: %v", err))
+		}
+		inputData = seq
+	default:
+		return errorResult("input_type 必须是 text 或 key")
+	}
+
+	if err := session.MCPWrite(inputData); err != nil {
+		return errorResult(fmt.Sprintf("发送输入失败: %v", err))
+	}
+	return textResult("输入已发送")
+}
+
+func handleTerminalGetOutput(pool *SessionPool, args map[string]interface{}) ToolResult {
+	sessionID := getStringArg(args, "session_id")
+	lines := getIntArg(args, "lines", 50)
+
+	if sessionID == "" {
+		return errorResult("session_id 是必填参数")
+	}
+
+	session, ok := pool.Get(sessionID)
+	if !ok {
+		return errorResult("终端不存在")
+	}
+
+	output := session.GetOutput()
+	clean := StripANSI(output)
+
+	// 按行分割，取最后N行
+	allLines := strings.Split(clean, "\n")
+	// 过滤空行并处理\r
+	var filtered []string
+	for _, line := range allLines {
+		line = strings.TrimRight(line, "\r")
+		filtered = append(filtered, line)
+	}
+
+	start := 0
+	if len(filtered) > lines {
+		start = len(filtered) - lines
+	}
+	result := strings.Join(filtered[start:], "\n")
+	return textResult(result)
+}
+
+func handleTerminalGetScreen(pool *SessionPool, args map[string]interface{}) ToolResult {
+	sessionID := getStringArg(args, "session_id")
+
+	if sessionID == "" {
+		return errorResult("session_id 是必填参数")
+	}
+
+	session, ok := pool.Get(sessionID)
+	if !ok {
+		return errorResult("终端不存在")
+	}
+
+	if session.vtScreen != nil {
+		screen := session.vtScreen.GetScreen()
+		return textResult(screen)
+	}
+
+	// 如果没有VT模拟器，回退到获取输出最后N行
+	output := session.GetOutput()
+	clean := StripANSI(output)
+	return textResult(clean)
+}
+
+func handleTerminalClose(pool *SessionPool, args map[string]interface{}) ToolResult {
+	sessionID := getStringArg(args, "session_id")
+
+	if sessionID == "" {
+		return errorResult("session_id 是必填参数")
+	}
+
+	if err := pool.Close(sessionID); err != nil {
+		return errorResult(fmt.Sprintf("关闭终端失败: %v", err))
+	}
+	return textResult("终端已关闭")
+}
+
+func handleTerminalRename(pool *SessionPool, args map[string]interface{}) ToolResult {
+	sessionID := getStringArg(args, "session_id")
+	newName := getStringArg(args, "new_name")
+
+	if sessionID == "" || newName == "" {
+		return errorResult("session_id 和 new_name 是必填参数")
+	}
+
+	if err := pool.Rename(sessionID, newName); err != nil {
+		return errorResult(fmt.Sprintf("重命名失败: %v", err))
+	}
+	return textResult(fmt.Sprintf("终端已重命名为: %s", newName))
+}
+
+// ==================== 参数辅助函数 ====================
+
+func getStringArg(args map[string]interface{}, key string) string {
+	if v, ok := args[key]; ok {
+		switch val := v.(type) {
+		case string:
+			return val
+		case json.Number:
+			return val.String()
+		default:
+			return fmt.Sprintf("%v", val)
+		}
+	}
+	return ""
+}
+
+func getIntArg(args map[string]interface{}, key string, defaultVal int) int {
+	if v, ok := args[key]; ok {
+		switch val := v.(type) {
+		case float64:
+			return int(val)
+		case int:
+			return val
+		case int64:
+			return int(val)
+		case string:
+			if n, err := strconv.Atoi(val); err == nil {
+				return n
+			}
+		case json.Number:
+			if n, err := val.Int64(); err == nil {
+				return int(n)
+			}
+		}
+	}
+	return defaultVal
+}

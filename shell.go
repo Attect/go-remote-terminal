@@ -14,6 +14,11 @@ type ShellConfig struct {
 	Args []string // Shell启动参数
 }
 
+// GetDefaultShell 返回当前系统检测到的默认Shell配置（用于MCP环境信息）
+func GetDefaultShell() *ShellConfig {
+	return DetectShell()
+}
+
 // DetectShell 根据当前操作系统自动检测并返回Shell配置
 func DetectShell() *ShellConfig {
 	switch runtime.GOOS {

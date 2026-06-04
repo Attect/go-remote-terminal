@@ -30,6 +30,9 @@ const (
 	// 双向
 	MsgPing MessageType = "ping" // 心跳检测
 	MsgPong MessageType = "pong" // 心跳响应
+
+	// 服务端广播
+	MsgSessionsChanged MessageType = "sessions_changed" // 会话列表变更通知
 )
 
 // Binary frame 类型标识
@@ -165,6 +168,11 @@ func NewPtyResizeMessage(rows, cols uint16) V1Message {
 		Type:    MsgPtyResize,
 		Payload: ResizePayload{Rows: rows, Cols: cols},
 	}
+}
+
+// NewSessionsChangedMessage 创建会话列表变更通知消息
+func NewSessionsChangedMessage() V1Message {
+	return V1Message{Version: ProtocolVersion, Type: MsgSessionsChanged}
 }
 
 // ==================== 解析函数 ====================

@@ -171,10 +171,21 @@ type Session struct {
 	ptyRows      uint16
 	ptyCols      uint16
 	FocusConn    *WSConn // 当前拥有输入焦点的连接
+
+	// MCP 相关字段
+	FixedRows uint16    // MCP终端固定行数，0表示动态
+	FixedCols uint16    // MCP终端固定列数，0表示动态
+	Opener    string    // 打开者名称（MCP）
+	Purpose   string    // 打开目的（MCP）
+	vtScreen  *VTScreen // 虚拟终端屏幕（非nil时启用VT模拟）
 }
 
-func newSession(id, name string, ptyProc PtyProcess) *Session {
+func newSession(id, name string, ptyProc PtyProcess, rows, cols uint16) *Session {
 	now := time.Now()
+	if rows == 0 || cols == 0 {
+		rows = 24
+		cols = 80
+	}
 	return &Session{
 		ID:           id,
 		Name:         name,
@@ -184,8 +195,8 @@ func newSession(id, name string, ptyProc PtyProcess) *Session {
 		Status:       SessionActive,
 		outputBuf:    NewRingBuffer(defaultRingBufferSize),
 		conns:        make(map[*WSConn]*ConnInfo),
-		ptyRows:      24,
-		ptyCols:      80,
+		ptyRows:      rows,
+		ptyCols:      cols,
 	}
 }
 
@@ -279,6 +290,10 @@ func (s *Session) UpdateConnSize(ws *WSConn, rows, cols uint16) (newPtyRows, new
 }
 
 func (s *Session) calcMinSizeLocked() (minRows, minCols uint16) {
+	// 固定尺寸终端不受WebSocket连接影响
+	if s.FixedRows > 0 && s.FixedCols > 0 {
+		return s.FixedRows, s.FixedCols
+	}
 	minRows = 0
 	minCols = 0
 	for _, info := range s.conns {
@@ -318,6 +333,12 @@ func (s *Session) WriteOutput(data []byte) {
 		return
 	}
 	_, _ = s.outputBuf.Write(data)
+
+	// 同时更新虚拟终端屏幕
+	if s.vtScreen != nil {
+		s.vtScreen.Feed(data)
+	}
+
 	frame := EncodeBinaryFrame(BinaryTypeOutput, data)
 
 	s.mu.Lock()
@@ -434,6 +455,18 @@ func (s *Session) ConnCount() int {
 	return len(s.conns)
 }
 
+// MCPWrite 直接写入PTY，不经过焦点检查，供MCP Agent使用
+func (s *Session) MCPWrite(data []byte) error {
+	s.mu.Lock()
+	pty := s.Pty
+	s.mu.Unlock()
+	if pty == nil {
+		return fmt.Errorf("PTY not available")
+	}
+	_, err := pty.Write(data)
+	return err
+}
+
 func (s *Session) startOutputReader(ctx context.Context) {
 	readCh := make(chan []byte, 16)
 	errCh := make(chan error, 1)
@@ -521,6 +554,16 @@ func NewSessionPool() *SessionPool {
 	return &SessionPool{}
 }
 
+// BroadcastSessionsChanged 向所有会话的所有WebSocket连接广播会话列表变更通知
+func (p *SessionPool) BroadcastSessionsChanged() {
+	msg := NewSessionsChangedMessage()
+	p.sessions.Range(func(_, value interface{}) bool {
+		session := value.(*Session)
+		session.BroadcastMessage(msg)
+		return true
+	})
+}
+
 func (p *SessionPool) nextSessionName() string {
 	p.counterMu.Lock()
 	defer p.counterMu.Unlock()
@@ -552,6 +595,10 @@ func (p *SessionPool) closeOldestSession() {
 }
 
 func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
+	return p.CreateWithMeta(name, shellPath, "", "", 0, 0)
+}
+
+func (p *SessionPool) CreateWithMeta(name, shellPath, opener, purpose string, rows, cols uint16) (*Session, error) {
 	if name == "" {
 		name = p.nextSessionName()
 	}
@@ -572,8 +619,14 @@ func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
 		}
 	}
 
+	// 确定PTY尺寸
+	ptyRows, ptyCols := rows, cols
+	if ptyRows == 0 || ptyCols == 0 {
+		ptyRows, ptyCols = 24, 80
+	}
+
 	ptyProc := NewPtyProcess()
-	if err := ptyProc.Start(shellConfig.Path, shellConfig.Args, 24, 80); err != nil {
+	if err := ptyProc.Start(shellConfig.Path, shellConfig.Args, ptyRows, ptyCols); err != nil {
 		return nil, &SessionError{
 			Code:    "SHELL_START_FAILED",
 			Message: fmt.Sprintf("failed to start shell: %v", err),
@@ -581,7 +634,16 @@ func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
 	}
 
 	sessionID := generateSessionID()
-	session := newSession(sessionID, name, ptyProc)
+	session := newSession(sessionID, name, ptyProc, rows, cols)
+	session.Opener = opener
+	session.Purpose = purpose
+
+	// 固定尺寸终端
+	if rows > 0 && cols > 0 {
+		session.FixedRows = rows
+		session.FixedCols = cols
+		session.vtScreen = NewVTScreen(int(rows), int(cols))
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	session.cancelFn = cancel
@@ -589,8 +651,11 @@ func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
 
 	p.sessions.Store(sessionID, session)
 
-	log.Printf("[SessionPool] created session %s (name=%s, shell=%s, pid=%d)",
-		sessionID, name, shellConfig.Path, ptyProc.Pid())
+	// 广播会话列表变更通知
+	p.BroadcastSessionsChanged()
+
+	log.Printf("[SessionPool] created session %s (name=%s, shell=%s, pid=%d, fixed=%v)",
+		sessionID, name, shellConfig.Path, ptyProc.Pid(), rows > 0 && cols > 0)
 
 	return session, nil
 }
@@ -641,6 +706,9 @@ func (p *SessionPool) Close(id string) error {
 
 	p.sessions.Delete(id)
 
+	// 广播会话列表变更通知
+	p.BroadcastSessionsChanged()
+
 	log.Printf("[SessionPool] closed session %s", id)
 	return nil
 }
@@ -659,6 +727,9 @@ func (p *SessionPool) Rename(id, newName string) error {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	session.Name = newName
+
+	// 广播会话列表变更通知
+	p.BroadcastSessionsChanged()
 
 	log.Printf("[SessionPool] renamed session %s to %q", id, newName)
 	return nil

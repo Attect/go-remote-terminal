@@ -474,7 +474,7 @@ const TermMgr = {
         // 滚动到底部确保看到最新内容
         this.term.scrollToBottom();
         this._mouseTrackingEnabled = false;
-    }
+    },
 
     /**
      * 处理文件/目录拖放事件

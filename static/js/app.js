@@ -23,6 +23,8 @@ const App = {
     _focused: false,        // 当前连接是否拥有输入焦点
     _bc: null,              // BroadcastChannel
     _quickCmds: [],         // 快捷命令列表
+    _autoScrollToBottom: false, // 切换会话后自动滚动到底部
+    _autoScrollTimer: null,  // 自动滚动定时器
 
     init() {
         // 初始化 BroadcastChannel（多标签页自感知）
@@ -243,11 +245,9 @@ const App = {
         }
 
         this.ws.onopen = () => {
-            // 确保终端尺寸与容器匹配后再发送认证
-            TermMgr.fit();
+            // 先发送认证消息，避免 fit() 触发的 onResize 在 auth 之前发送 resize
             const rows = TermMgr.getRows();
             const cols = TermMgr.getCols();
-            // 发送认证消息（附带终端尺寸，服务端以此作为初始PTY尺寸）
             const authMsg = {
                 v: 1,
                 type: 'auth',
@@ -259,6 +259,8 @@ const App = {
                 }
             };
             this.ws.send(JSON.stringify(authMsg));
+            // 认证后再 fit，onResize 若触发 resize 消息也在 auth 之后
+            TermMgr.fit();
         };
 
         this.ws.onmessage = (event) => {
@@ -308,6 +310,10 @@ const App = {
         const payload = data.slice(1);
         if (msgType === 0x02) {
             TermMgr.write(payload);
+            // 切换会话后的短时间内自动滚动到底部
+            if (this._autoScrollToBottom) {
+                TermMgr.scrollToBottom();
+            }
         }
     },
 
@@ -333,6 +339,9 @@ const App = {
                 this.handleError(msg);
                 break;
             case 'pong':
+                break;
+            case 'sessions_changed':
+                Sidebar.refreshSessions();
                 break;
             default:
                 console.log('[App] unknown message type:', msg.type);
@@ -372,6 +381,16 @@ const App = {
         // 并同步给服务端，由服务端统一计算最小PTY尺寸后广播
         TermMgr.fit();
         this.sendResize(TermMgr.getRows(), TermMgr.getCols());
+        TermMgr.scrollToBottom();
+
+        // 切换会话后的一段时间内，收到输出自动滚动到底部
+        this._autoScrollToBottom = true;
+        if (this._autoScrollTimer) {
+            clearTimeout(this._autoScrollTimer);
+        }
+        this._autoScrollTimer = setTimeout(() => {
+            this._autoScrollToBottom = false;
+        }, 1000);
 
         this._connecting = false;
         this.reconnectAttempts = 0;

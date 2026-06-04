@@ -76,6 +76,11 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	}
 
 	r.GET("/ws", h.HandleWebSocket)
+
+	// MCP 路由（同时支持 SSE 传输和 Streamable HTTP 传输）
+	r.GET("/mcp/sse", h.tokenAuth.GinMiddleware(), h.HandleMCPSSE)
+	r.POST("/mcp/sse", h.tokenAuth.GinMiddleware(), h.HandleMCPHTTP)
+	r.POST("/mcp/message", h.HandleMCPMessage)
 }
 
 func (h *Handler) HandleSessions(c *gin.Context) {
@@ -155,6 +160,9 @@ func (h *Handler) HandleCreateSession(c *gin.Context) {
 		Message: "success",
 		Data:    dto,
 	})
+
+	// 广播会话列表变更通知
+	h.pool.BroadcastSessionsChanged()
 }
 
 func (h *Handler) HandleCloseSession(c *gin.Context) {
@@ -182,6 +190,9 @@ func (h *Handler) HandleCloseSession(c *gin.Context) {
 		Code:    CodeSuccess,
 		Message: "session closed",
 	})
+
+	// 广播会话列表变更通知
+	h.pool.BroadcastSessionsChanged()
 }
 
 func (h *Handler) HandleRenameSession(c *gin.Context) {

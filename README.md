@@ -1,119 +1,8 @@
 # Go Remote Terminal
 
-[English](#english) | [中文](#chinese)
-
-<a name="english"></a>
-## English
-
-A lightweight, cross-platform Web Terminal server written in Go. Access your local shell from any device via a browser — no client installation required.
-
-### Features
-
-- **Cross-Platform**: Supports Windows 10/11, macOS, and Linux. Build for any target platform from any host.
-- **Zero-Client**: Pure browser-based access. Works on desktop, tablet, and mobile.
-- **Session Persistence**: Shell processes keep running after the browser disconnects. Reconnect anytime to resume.
-- **Multi-User Sharing**: Multiple clients can connect to the same session simultaneously with:
-  - Per-connection random name & color identifiers
-  - Single focus owner (input control), others are read-only observers
-  - Focus stealing via "Take Control" button
-  - Real-time connection count badges
-- **TUI Support**: Full ANSI escape sequence support via `xterm.js`. Run `vim`, `htop`, `winget`, etc. flawlessly.
-- **Security**: Token-based authentication with admin and read-only token levels.
-- **Mobile-Ready**: Virtual keyboard with `Esc`, `Tab`, `Ctrl`, `Alt`, `Shift`, arrows, and paste support. Long-press to lock modifier keys.
-- **Quick Commands**: Customizable command drawer with localStorage persistence.
-- **Search**: In-terminal search with `Ctrl+Shift+F`.
-- **Export**: Save terminal output to a text file.
-- **Rate Limiting**: Per-connection token bucket (100KB/s sustained, 500KB burst).
-- **Protocol v1**: Hybrid JSON + Binary WebSocket protocol for minimal overhead.
-
-### Quick Start
-
-```bash
-# Build
-go build -o go-remote-terminal .
-
-# Run with a token
-./go-remote-terminal -t your-secure-token
-
-# Or use environment variables
-GRT_TOKEN=your-secure-token ./go-remote-terminal
-```
-
-Then open `http://localhost:8080` in your browser and enter the token.
-
-### Docker
-
-```bash
-docker build -t go-remote-terminal .
-docker run -p 8080:8080 -e GRT_TOKEN=your-token go-remote-terminal
-```
-
-### Usage
-
-```
-Usage: go-remote-terminal [options]
-
-Options:
-  -h, --host string    Listen host (default "0.0.0.0")
-  -p, --port string    Listen port (default "8080")
-  -t, --token string   Admin access token (required)
-  --ro-token string    Read-only token (optional)
-```
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `GRT_HOST` | Listen host |
-| `GRT_PORT` | Listen port |
-| `GRT_TOKEN` | Admin token |
-| `GRT_RO_TOKEN` | Read-only token |
-
-### Building from Source
-
-```bash
-# Local build
-go build .
-
-# Cross-compilation
-GOOS=linux   GOARCH=amd64 go build -o dist/go-remote-terminal-linux-amd64
-GOOS=linux   GOARCH=arm64 go build -o dist/go-remote-terminal-linux-arm64
-GOOS=darwin  GOARCH=amd64 go build -o dist/go-remote-terminal-darwin-amd64
-GOOS=darwin  GOARCH=arm64 go build -o dist/go-remote-terminal-darwin-arm64
-GOOS=windows GOARCH=amd64 go build -o dist/go-remote-terminal-windows-amd64.exe
-```
-
-### Architecture
-
-```
-┌─────────────┐      WebSocket      ┌─────────────────────────────────────┐
-│   Browser   │ ◄─────────────────► │  Go Remote Terminal Server          │
-│  (xterm.js) │   HTTP (static)     │  ├─ Gin HTTP Server                 │
-└─────────────┘                     │  ├─ Session Pool (sync.Map)         │
-                                    │  ├─ PTY Handler (creack/pty)        │
-                                    │  ├─ Rate Limiter (token bucket)     │
-                                    │  └─ Focus Manager                   │
-                                    └─────────────────────────────────────┘
-```
-
-### Tech Stack
-
-- **Backend**: Go 1.20+, Gin, Gorilla WebSocket, creack/pty
-- **Frontend**: Vanilla JS, xterm.js 5.3.0, xterm-addon-fit, xterm-addon-search
-- **Protocol**: v1 Hybrid (JSON text frames for control, binary frames for I/O)
-
-### License
-
-[Apache License 2.0](LICENSE)
-
----
-
-<a name="chinese"></a>
-## 中文
-
 Go Remote Terminal 是一个轻量级、跨平台的 Web 终端服务程序。只需在目标机器上运行一个二进制文件，即可通过浏览器从任意设备远程访问本地 Shell，无需安装任何客户端。
 
-### 功能特性
+## 功能特性
 
 - **跨平台支持**：支持 Windows 10/11、macOS、Linux。可在任意平台上交叉编译出所有目标平台的二进制文件。
 - **纯浏览器访问**：无需安装客户端 App，桌面端、平板、手机均可通过浏览器访问。
@@ -133,9 +22,10 @@ Go Remote Terminal 是一个轻量级、跨平台的 Web 终端服务程序。�
 - **终端搜索**：`Ctrl+Shift+F` 呼出搜索框。
 - **终端导出**：一键将终端输出保存为文本文件。
 - **速率限制**：每个连接独立令牌桶限流（100KB/s 持续，500KB 突发）。
+- **MCP 服务（SSE）**：完整支持 MCP 2024-11-05 规范的 SSE 传输。AI Agent 可通过 8 个标准工具远程创建、控制和检视终端（`terminal_create`、`terminal_send_input`、`terminal_get_screen` 等）。
 - **高效协议**：v1 混合协议，控制消息用 JSON，输入输出用 Binary Frame，零 Base64 开销。
 
-### 快速开始
+## 快速开始
 
 ```bash
 # 编译
@@ -150,14 +40,14 @@ GRT_TOKEN=your-secure-token ./go-remote-terminal
 
 然后在浏览器中打开 `http://localhost:8080` 并输入 Token 即可。
 
-### Docker 运行
+## Docker 运行
 
 ```bash
 docker build -t go-remote-terminal .
 docker run -p 8080:8080 -e GRT_TOKEN=your-token go-remote-terminal
 ```
 
-### 命令行参数
+## 命令行参数
 
 ```
 用法: go-remote-terminal [选项]
@@ -169,7 +59,7 @@ docker run -p 8080:8080 -e GRT_TOKEN=your-token go-remote-terminal
   --ro-token string    只读 Token（可选）
 ```
 
-### 环境变量
+## 环境变量
 
 | 变量名 | 说明 |
 |--------|------|
@@ -178,7 +68,7 @@ docker run -p 8080:8080 -e GRT_TOKEN=your-token go-remote-terminal
 | `GRT_TOKEN` | 管理 Token |
 | `GRT_RO_TOKEN` | 只读 Token |
 
-### 源码构建
+## 源码构建
 
 ```bash
 # 本地构建
@@ -192,25 +82,65 @@ GOOS=darwin  GOARCH=arm64 go build -o dist/go-remote-terminal-darwin-arm64
 GOOS=windows GOARCH=amd64 go build -o dist/go-remote-terminal-windows-amd64.exe
 ```
 
-### 系统架构
+## MCP 配置与连接
+
+本服务内置 MCP (Model Context Protocol) 2024-11-05 服务端，AI Agent 可通过 SSE 传输方式远程管理终端。
+
+### 连接端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/mcp/sse` | `GET` | 建立 SSE 长连接，需携带 Bearer Token |
+| `/mcp/message?sid=<id>` | `POST` | 发送 JSON-RPC 请求，需携带 Bearer Token |
+
+### 连接流程
+
+1. Agent 向 `GET /mcp/sse` 发送请求，Header 携带 `Authorization: Bearer <管理Token>`
+2. 服务端返回 SSE 流，首条事件为 `event: endpoint`，data 为消息 POST 端点（如 `/mcp/message?sid=abc123`）
+3. Agent 向该 POST 端点发送 JSON-RPC 请求（如 `tools/list`、`tools/call`）
+4. 服务端通过 SSE 流的 `event: message` 返回 JSON-RPC 响应
+
+### MCP 工具列表
+
+| 工具名 | 功能 |
+|--------|------|
+| `terminal_environment_info` | 获取环境信息（默认 shell、操作系统、架构） |
+| `terminal_create` | 创建终端（参数：name, opener, purpose, rows, cols） |
+| `terminal_list` | 查询所有已启用的终端 |
+| `terminal_send_input` | 发送输入（`input_type`: text / key，支持方向键、Ctrl、Alt 等） |
+| `terminal_get_output` | 获取最后 N 行输出（自动去除 ANSI 控制符） |
+| `terminal_get_screen` | 获取当前可见屏幕内容（适用于 TUI，自动去除 ANSI 控制符） |
+| `terminal_close` | 关闭终端 |
+| `terminal_rename` | 重命名终端 |
+
+### 注意事项
+
+- MCP 终端创建后**尺寸固定**（默认 120×40），不随前端页面查看尺寸变化
+- Agent 输入**直接写 PTY**，不参与 WebSocket 用户的焦点竞争
+- MCP 创建的终端**可被前端页面查看和连接**，页面用户需申请焦点后才能输入
+
+## 系统架构
 
 ```
 ┌─────────────┐      WebSocket      ┌─────────────────────────────────────┐
 │   浏览器     │ ◄─────────────────► │  Go Remote Terminal 服务端          │
 │  (xterm.js) │   HTTP (静态页面)    │  ├─ Gin HTTP 服务器                  │
 └─────────────┘                     │  ├─ 会话池 (sync.Map)                │
-                                    │  ├─ PTY 处理器 (creack/pty)          │
-                                    │  ├─ 速率限制器 (令牌桶)               │
-                                    │  └─ 焦点管理器                        │
-                                    └─────────────────────────────────────┘
+       │                            │  ├─ PTY 处理器 (creack/pty)          │
+       │ SSE                          │  ├─ 速率限制器 (令牌桶)               │
+       ▼                            │  ├─ 焦点管理器                        │
+┌─────────────┐                     │  ├─ MCP 服务 (SSE + JSON-RPC)        │
+│  AI Agent   │ ◄─────────────────► │  └─ VTScreen 虚拟终端模拟器           │
+│   (MCP)     │                     └─────────────────────────────────────┘
+└─────────────┘
 ```
 
-### 技术栈
+## 技术栈
 
 - **后端**: Go 1.20+, Gin, Gorilla WebSocket, creack/pty
 - **前端**: 原生 JavaScript, xterm.js 5.3.0, xterm-addon-fit, xterm-addon-search
 - **协议**: v1 混合协议（控制消息用 JSON 文本帧，输入输出用二进制帧）
 
-### 开源协议
+## 开源协议
 
 [Apache License 2.0](LICENSE)
