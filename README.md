@@ -53,8 +53,8 @@ docker run -p 8080:8080 -e GRT_TOKEN=your-token go-remote-terminal
 用法: go-remote-terminal [选项]
 
 选项:
-  -h, --host string    监听地址 (默认 "0.0.0.0")
-  -p, --port string    监听端口 (默认 "8080")
+  --host string        监听地址 (默认 "0.0.0.0")
+  --port int           监听端口 (默认 8080)
   -t, --token string   管理 Token（必填）
   --ro-token string    只读 Token（可选）
 ```
@@ -91,7 +91,7 @@ GOOS=windows GOARCH=amd64 go build -o dist/go-remote-terminal-windows-amd64.exe
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/mcp/sse` | `GET` | 建立 SSE 长连接，需携带 Bearer Token |
-| `/mcp/message?sid=<id>` | `POST` | 发送 JSON-RPC 请求，需携带 Bearer Token |
+| `/mcp/message?sid=<id>` | `POST` | 发送 JSON-RPC 请求（SSE transport，通过 sid 认证） |
 
 ### 连接流程
 
@@ -115,7 +115,7 @@ GOOS=windows GOARCH=amd64 go build -o dist/go-remote-terminal-windows-amd64.exe
 
 ### 注意事项
 
-- MCP 终端创建后**尺寸固定**（默认 120×40），不随前端页面查看尺寸变化
+- MCP 终端创建后**尺寸固定**（默认 40×120），不随前端页面查看尺寸变化
 - Agent 输入**直接写 PTY**，不参与 WebSocket 用户的焦点竞争
 - MCP 创建的终端**可被前端页面查看和连接**，页面用户需申请焦点后才能输入
 
