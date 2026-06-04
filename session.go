@@ -278,6 +278,11 @@ func (s *Session) UpdateConnSize(ws *WSConn, rows, cols uint16) (newPtyRows, new
 
 	minRows, minCols := s.calcMinSizeLocked()
 	if minRows == s.ptyRows && minCols == s.ptyCols {
+		// 固定尺寸终端：即使 PTY 尺寸未变，若客户端请求尺寸与固定尺寸不一致，
+		// 仍需通知客户端同步，避免前端与 PTY 尺寸不匹配导致渲染错位
+		if s.FixedRows > 0 && s.FixedCols > 0 && (rows != minRows || cols != minCols) {
+			return minRows, minCols, true
+		}
 		return minRows, minCols, false
 	}
 

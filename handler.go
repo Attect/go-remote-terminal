@@ -343,7 +343,13 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 	}
 
 	// 注册连接
-	session.AddConn(ws, initRows, initCols, readOnly)
+	ptyRows, ptyCols := session.AddConn(ws, initRows, initCols, readOnly)
+
+	// 固定尺寸终端：若客户端初始尺寸与 PTY 实际尺寸不一致，
+	// 立即通知前端同步，避免渲染错位
+	if session.FixedRows > 0 && session.FixedCols > 0 && (initRows != ptyRows || initCols != ptyCols) {
+		_ = ws.WriteJSON(NewPtyResizeMessage(ptyRows, ptyCols))
+	}
 
 	// 发送会话信息
 	_ = ws.WriteJSON(NewSessionInfoMessage(session, ws, readOnly))
