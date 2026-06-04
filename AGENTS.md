@@ -60,18 +60,18 @@ GRT_TOKEN=your-secure-token ./go-remote-terminal
 
 ### 工具列表
 
-所有工具名以 `terminal_` 为前缀：
+所有工具名以 `` 为前缀：
 
 | 工具 | 说明 |
 |------|------|
-| `terminal_environment_info` | 返回默认 shell、OS、架构 |
-| `terminal_create` | 创建终端，参数：name, opener, purpose, rows(默认40), cols(默认120) |
-| `terminal_list` | 列出所有活跃终端 |
-| `terminal_send_input` | 发送输入，`input_type`: text / key |
-| `terminal_get_output` | 获取最后 N 行输出（去 ANSI） |
-| `terminal_get_screen` | 获取当前可见屏幕（VT 模拟器渲染，去 ANSI） |
-| `terminal_close` | 关闭终端 |
-| `terminal_rename` | 重命名终端 |
+| `environment_info` | 返回默认 shell、OS、架构 |
+| `create` | 创建终端，参数：name, opener, purpose, rows(默认40), cols(默认120) |
+| `list` | 列出所有活跃终端 |
+| `send_input` | 发送输入，`input_type`: text / key |
+| `get_output` | 获取最后 N 行输出（去 ANSI） |
+| `get_screen` | 获取当前可见屏幕（VT 模拟器渲染，去 ANSI） |
+| `close` | 关闭终端 |
+| `rename` | 重命名终端 |
 
 ### MCP 终端与普通终端的区别
 

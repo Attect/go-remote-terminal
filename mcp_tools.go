@@ -61,7 +61,7 @@ func errorResult(errMsg string) ToolResult {
 func AllMCPTools() []MCPTool {
 	return []MCPTool{
 		{
-			Name:        "terminal_environment_info",
+			Name:        "environment_info",
 			Description: "获取当前运行环境的基础信息，包括默认shell路径、操作系统、架构等",
 			InputSchema: ToolSchema{
 				Type:       "object",
@@ -70,7 +70,7 @@ func AllMCPTools() []MCPTool {
 			},
 		},
 		{
-			Name:        "terminal_create",
+			Name:        "create",
 			Description: "创建一个新的终端会话。创建的终端可被前端页面查看和操作，Agent始终可直接操作。终端尺寸固定，不随页面查看尺寸变化。",
 			InputSchema: ToolSchema{
 				Type: "object",
@@ -85,7 +85,7 @@ func AllMCPTools() []MCPTool {
 			},
 		},
 		{
-			Name:        "terminal_list",
+			Name:        "list",
 			Description: "查询当前已启用的所有终端会话列表",
 			InputSchema: ToolSchema{
 				Type:       "object",
@@ -94,7 +94,7 @@ func AllMCPTools() []MCPTool {
 			},
 		},
 		{
-			Name:        "terminal_send_input",
+			Name:        "send_input",
 			Description: "向指定终端发送输入。支持文本输入和键盘模拟输入（方向键、Ctrl、Alt、Esc等），可用于操作TUI程序。",
 			InputSchema: ToolSchema{
 				Type: "object",
@@ -107,7 +107,7 @@ func AllMCPTools() []MCPTool {
 			},
 		},
 		{
-			Name:        "terminal_get_output",
+			Name:        "get_output",
 			Description: "获取指定终端的最后N行输出内容。自动去除ANSI色彩控制符，避免干扰Agent理解。",
 			InputSchema: ToolSchema{
 				Type: "object",
@@ -119,7 +119,7 @@ func AllMCPTools() []MCPTool {
 			},
 		},
 		{
-			Name:        "terminal_get_screen",
+			Name:        "get_screen",
 			Description: "获取指定终端当前可见屏幕的渲染内容。适用于TUI程序（如top/htop/vim等），自动去除ANSI色彩控制符。",
 			InputSchema: ToolSchema{
 				Type: "object",
@@ -130,7 +130,7 @@ func AllMCPTools() []MCPTool {
 			},
 		},
 		{
-			Name:        "terminal_close",
+			Name:        "close",
 			Description: "关闭指定的终端会话。Agent使用完毕后应主动关闭终端。",
 			InputSchema: ToolSchema{
 				Type: "object",
@@ -141,7 +141,7 @@ func AllMCPTools() []MCPTool {
 			},
 		},
 		{
-			Name:        "terminal_rename",
+			Name:        "rename",
 			Description: "重命名指定的终端会话。可在不同流程中更新终端名称以便区分。",
 			InputSchema: ToolSchema{
 				Type: "object",
@@ -160,21 +160,21 @@ func AllMCPTools() []MCPTool {
 // HandleMCPTool 分发给具体的工具处理函数
 func HandleMCPTool(pool *SessionPool, name string, args map[string]interface{}) ToolResult {
 	switch name {
-	case "terminal_environment_info":
+	case "environment_info":
 		return handleTerminalEnvironmentInfo()
-	case "terminal_create":
+	case "create":
 		return handleTerminalCreate(pool, args)
-	case "terminal_list":
+	case "list":
 		return handleTerminalList(pool)
-	case "terminal_send_input":
+	case "send_input":
 		return handleTerminalSendInput(pool, args)
-	case "terminal_get_output":
+	case "get_output":
 		return handleTerminalGetOutput(pool, args)
-	case "terminal_get_screen":
+	case "get_screen":
 		return handleTerminalGetScreen(pool, args)
-	case "terminal_close":
+	case "close":
 		return handleTerminalClose(pool, args)
-	case "terminal_rename":
+	case "rename":
 		return handleTerminalRename(pool, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name))

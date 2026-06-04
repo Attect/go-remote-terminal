@@ -22,7 +22,7 @@ Go Remote Terminal 是一个轻量级、跨平台的 Web 终端服务程序。�
 - **终端搜索**：`Ctrl+Shift+F` 呼出搜索框。
 - **终端导出**：一键将终端输出保存为文本文件。
 - **速率限制**：每个连接独立令牌桶限流（100KB/s 持续，500KB 突发）。
-- **MCP 服务（SSE）**：完整支持 MCP 2024-11-05 规范的 SSE 传输。AI Agent 可通过 8 个标准工具远程创建、控制和检视终端（`terminal_create`、`terminal_send_input`、`terminal_get_screen` 等）。
+- **MCP 服务（SSE）**：完整支持 MCP 2024-11-05 规范的 SSE 传输。AI Agent 可通过 8 个标准工具远程创建、控制和检视终端（`create`、`send_input`、`get_screen` 等）。
 - **高效协议**：v1 混合协议，控制消息用 JSON，输入输出用 Binary Frame，零 Base64 开销。
 
 ## 快速开始
@@ -104,14 +104,14 @@ GOOS=windows GOARCH=amd64 go build -o dist/go-remote-terminal-windows-amd64.exe
 
 | 工具名 | 功能 |
 |--------|------|
-| `terminal_environment_info` | 获取环境信息（默认 shell、操作系统、架构） |
-| `terminal_create` | 创建终端（参数：name, opener, purpose, rows, cols） |
-| `terminal_list` | 查询所有已启用的终端 |
-| `terminal_send_input` | 发送输入（`input_type`: text / key，支持方向键、Ctrl、Alt 等） |
-| `terminal_get_output` | 获取最后 N 行输出（自动去除 ANSI 控制符） |
-| `terminal_get_screen` | 获取当前可见屏幕内容（适用于 TUI，自动去除 ANSI 控制符） |
-| `terminal_close` | 关闭终端 |
-| `terminal_rename` | 重命名终端 |
+| `environment_info` | 获取环境信息（默认 shell、操作系统、架构） |
+| `create` | 创建终端（参数：name, opener, purpose, rows, cols） |
+| `list` | 查询所有已启用的终端 |
+| `send_input` | 发送输入（`input_type`: text / key，支持方向键、Ctrl、Alt 等） |
+| `get_output` | 获取最后 N 行输出（自动去除 ANSI 控制符） |
+| `get_screen` | 获取当前可见屏幕内容（适用于 TUI，自动去除 ANSI 控制符） |
+| `close` | 关闭终端 |
+| `rename` | 重命名终端 |
 
 ### 注意事项
 
