@@ -317,16 +317,7 @@ func sendMCPResponse(mcpSess *MCPSession, resp JSONRPCResponse) {
 	}
 }
 
-func sendMCPNotification(mcpSess *MCPSession, notif JSONRPCNotification) {
-	data, err := json.Marshal(notif)
-	if err != nil {
-		log.Printf("[MCP] marshal notification failed: %v", err)
-		return
-	}
-	if err := mcpSess.SendEvent("message", string(data)); err != nil {
-		log.Printf("[MCP] send notification failed: %v", err)
-	}
-}
+
 
 // processMCPRequest 处理 JSON-RPC 请求，返回响应（通知返回nil）
 func (h *Handler) processMCPRequest(mcpSess *MCPSession, req *JSONRPCRequest) *JSONRPCResponse {

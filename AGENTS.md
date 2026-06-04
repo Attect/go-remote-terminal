@@ -65,7 +65,7 @@ GRT_TOKEN=your-secure-token ./go-remote-terminal
 | 工具 | 说明 |
 |------|------|
 | `terminal_environment_info` | 返回默认 shell、OS、架构 |
-| `terminal_create` | 创建终端，参数：name, opener, purpose, rows(默认120), cols(默认40) |
+| `terminal_create` | 创建终端，参数：name, opener, purpose, rows(默认40), cols(默认120) |
 | `terminal_list` | 列出所有活跃终端 |
 | `terminal_send_input` | 发送输入，`input_type`: text / key |
 | `terminal_get_output` | 获取最后 N 行输出（去 ANSI） |
@@ -75,7 +75,7 @@ GRT_TOKEN=your-secure-token ./go-remote-terminal
 
 ### MCP 终端与普通终端的区别
 
-- MCP 终端有**固定尺寸**（默认 120×40），不随前端页面用户连接尺寸变化
+- MCP 终端有**固定尺寸**（默认 40×120），不随前端页面用户连接尺寸变化
 - Agent 输入**直接写 PTY**，不参与 WebSocket 焦点竞争
 - MCP 终端**可被前端页面查看和连接**，WebSocket 用户需申请焦点后才能输入
 - 所有终端（无论 MCP 还是 WebSocket 创建）共享同一个 SessionPool

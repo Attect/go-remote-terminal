@@ -107,12 +107,14 @@ func NewWSConn(conn *websocket.Conn) *WSConn {
 func (w *WSConn) WriteMessage(messageType int, data []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	_ = w.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return w.conn.WriteMessage(messageType, data)
 }
 
 func (w *WSConn) WriteJSON(v interface{}) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	_ = w.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return w.conn.WriteJSON(v)
 }
 
@@ -354,9 +356,11 @@ func (s *Session) WriteOutput(data []byte) {
 	s.mu.Unlock()
 
 	for _, ws := range conns {
-		if err := ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
-			log.Printf("[Session %s] write binary to WS failed: %v", s.ID, err)
-		}
+		go func(conn *WSConn) {
+			if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+				log.Printf("[Session %s] write binary to WS failed: %v", s.ID, err)
+			}
+		}(ws)
 	}
 }
 
@@ -730,8 +734,8 @@ func (p *SessionPool) Rename(id, newName string) error {
 
 	session := val.(*Session)
 	session.mu.Lock()
-	defer session.mu.Unlock()
 	session.Name = newName
+	session.mu.Unlock()
 
 	// 广播会话列表变更通知
 	p.BroadcastSessionsChanged()

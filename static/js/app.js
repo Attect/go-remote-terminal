@@ -463,6 +463,7 @@ const App = {
             try { this.ws.close(); } catch (e) {}
             this.ws = null;
         }
+        this._connecting = false;
     },
 
     /**

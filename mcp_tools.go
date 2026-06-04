@@ -78,8 +78,8 @@ func AllMCPTools() []MCPTool {
 					"name":    {Type: "string", Description: "终端名称（可选，默认自动生成）"},
 					"opener":  {Type: "string", Description: "打开者名称（如AI Agent名称）"},
 					"purpose": {Type: "string", Description: "打开目的/用途描述"},
-					"rows":    {Type: "integer", Description: "终端行数（可选，默认120）", Default: 120},
-					"cols":    {Type: "integer", Description: "终端列数（可选，默认40）", Default: 40},
+					"rows":    {Type: "integer", Description: "终端行数（可选，默认40）", Default: 40},
+					"cols":    {Type: "integer", Description: "终端列数（可选，默认120）", Default: 120},
 				},
 				Required: []string{"opener", "purpose"},
 			},
@@ -192,8 +192,8 @@ func handleTerminalCreate(pool *SessionPool, args map[string]interface{}) ToolRe
 	name := getStringArg(args, "name")
 	opener := getStringArg(args, "opener")
 	purpose := getStringArg(args, "purpose")
-	rows := getIntArg(args, "rows", 120)
-	cols := getIntArg(args, "cols", 40)
+	rows := getIntArg(args, "rows", 40)
+	cols := getIntArg(args, "cols", 120)
 
 	if opener == "" || purpose == "" {
 		return errorResult("opener 和 purpose 是必填参数")
