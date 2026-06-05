@@ -7,7 +7,8 @@ type PtyProcess interface {
 	//   - cmd: Shell命令路径
 	//   - args: 命令参数
 	//   - rows, cols: 初始终端尺寸
-	Start(cmd string, args []string, rows, cols uint16) error
+	//   - workDir: 工作目录（空字符串表示使用当前目录）
+	Start(cmd string, args []string, rows, cols uint16, workDir string) error
 
 	// Read 从PTY读取输出数据
 	Read(p []byte) (n int, err error)

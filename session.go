@@ -604,10 +604,10 @@ func (p *SessionPool) closeOldestSession() {
 }
 
 func (p *SessionPool) Create(name, shellPath string) (*Session, error) {
-	return p.CreateWithMeta(name, shellPath, "", "", 0, 0)
+	return p.CreateWithMeta(name, shellPath, "", "", 0, 0, "")
 }
 
-func (p *SessionPool) CreateWithMeta(name, shellPath, opener, purpose string, rows, cols uint16) (*Session, error) {
+func (p *SessionPool) CreateWithMeta(name, shellPath, opener, purpose string, rows, cols uint16, workDir string) (*Session, error) {
 	if name == "" {
 		name = p.nextSessionName()
 	}
@@ -635,7 +635,7 @@ func (p *SessionPool) CreateWithMeta(name, shellPath, opener, purpose string, ro
 	}
 
 	ptyProc := NewPtyProcess()
-	if err := ptyProc.Start(shellConfig.Path, shellConfig.Args, ptyRows, ptyCols); err != nil {
+	if err := ptyProc.Start(shellConfig.Path, shellConfig.Args, ptyRows, ptyCols, workDir); err != nil {
 		return nil, &SessionError{
 			Code:    "SHELL_START_FAILED",
 			Message: fmt.Sprintf("failed to start shell: %v", err),

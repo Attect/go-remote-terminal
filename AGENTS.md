@@ -65,7 +65,7 @@ GRT_TOKEN=your-secure-token ./go-remote-terminal
 | 工具 | 说明 |
 |------|------|
 | `environment_info` | 返回默认 shell、OS、架构 |
-| `create` | 创建终端，参数：name, opener, purpose, rows(默认40), cols(默认120) |
+| `create` | 创建终端，参数：name, opener, purpose, rows(默认40), cols(默认120), working_directory |
 | `list` | 列出所有活跃终端 |
 | `send_input` | 发送输入，`input_type`: text / key，`submit`: 是否自动回车执行（仅text有效，默认false） |
 | `get_output` | 获取最后 N 行输出（去 ANSI） |

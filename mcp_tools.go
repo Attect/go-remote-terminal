@@ -78,10 +78,11 @@ func AllMCPTools() []MCPTool {
 					"name":    {Type: "string", Description: "终端名称（可选，默认自动生成）"},
 					"opener":  {Type: "string", Description: "打开者名称（如AI Agent名称）"},
 					"purpose": {Type: "string", Description: "打开目的/用途描述"},
-					"rows":    {Type: "integer", Description: "终端行数（可选，默认40）", Default: 40},
-					"cols":    {Type: "integer", Description: "终端列数（可选，默认120）", Default: 120},
+					"rows":               {Type: "integer", Description: "终端行数（可选，默认40）", Default: 40},
+					"cols":               {Type: "integer", Description: "终端列数（可选，默认120）", Default: 120},
+					"working_directory":  {Type: "string", Description: "终端初始工作目录"},
 				},
-				Required: []string{"opener", "purpose"},
+				Required: []string{"opener", "purpose", "working_directory"},
 			},
 		},
 		{
@@ -195,18 +196,22 @@ func handleTerminalCreate(pool *SessionPool, args map[string]interface{}) ToolRe
 	purpose := getStringArg(args, "purpose")
 	rows := getIntArg(args, "rows", 40)
 	cols := getIntArg(args, "cols", 120)
+	workDir := getStringArg(args, "working_directory")
 
 	if opener == "" || purpose == "" {
 		return errorResult("opener 和 purpose 是必填参数")
 	}
+	if workDir == "" {
+		return errorResult("working_directory 是必填参数")
+	}
 
-	session, err := pool.CreateWithMeta(name, "", opener, purpose, uint16(rows), uint16(cols))
+	session, err := pool.CreateWithMeta(name, "", opener, purpose, uint16(rows), uint16(cols), workDir)
 	if err != nil {
 		return errorResult(fmt.Sprintf("创建终端失败: %v", err))
 	}
 
-	result := fmt.Sprintf("终端创建成功\n会话ID: %s\n名称: %s\n打开者: %s\n目的: %s\n尺寸: %dx%d",
-		session.ID, session.Name, session.Opener, session.Purpose, rows, cols)
+	result := fmt.Sprintf("终端创建成功\n会话ID: %s\n名称: %s\n打开者: %s\n目的: %s\n尺寸: %dx%d\n工作目录: %s",
+		session.ID, session.Name, session.Opener, session.Purpose, rows, cols, workDir)
 	return textResult(result)
 }
 

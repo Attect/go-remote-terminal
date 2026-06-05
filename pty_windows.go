@@ -41,7 +41,7 @@ func NewPtyProcess() PtyProcess {
 }
 
 // Start 启动PTY进程
-func (p *WindowsPtyProcess) Start(cmd string, args []string, rows, cols uint16) error {
+func (p *WindowsPtyProcess) Start(cmd string, args []string, rows, cols uint16, workDir string) error {
 	// conpty.Start需要完整的命令行字符串
 	// 对命令路径和参数进行引号转义，处理含空格的路径
 	commandLine := quoteArg(cmd)
@@ -49,9 +49,13 @@ func (p *WindowsPtyProcess) Start(cmd string, args []string, rows, cols uint16) 
 		commandLine += " " + quoteArg(arg)
 	}
 
-	cpty, err := conpty.Start(commandLine,
-		conpty.ConPtyDimensions(int(cols), int(rows)),
-	)
+	var opts []conpty.ConPtyOption
+	opts = append(opts, conpty.ConPtyDimensions(int(cols), int(rows)))
+	if workDir != "" {
+		opts = append(opts, conpty.ConPtyWorkDir(workDir))
+	}
+
+	cpty, err := conpty.Start(commandLine, opts...)
 	if err != nil {
 		return err
 	}

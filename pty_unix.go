@@ -27,8 +27,11 @@ func NewPtyProcess() PtyProcess {
 }
 
 // Start 启动PTY进程
-func (p *UnixPtyProcess) Start(cmd string, args []string, rows, cols uint16) error {
+func (p *UnixPtyProcess) Start(cmd string, args []string, rows, cols uint16, workDir string) error {
 	p.cmd = exec.Command(cmd, args...)
+	if workDir != "" {
+		p.cmd.Dir = workDir
+	}
 	p.cmd.Env = os.Environ()
 
 	// 确保UTF-8 locale已设置，解决中文显示问题
