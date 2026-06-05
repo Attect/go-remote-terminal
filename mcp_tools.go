@@ -71,7 +71,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "create",
-			Description: "创建一个新的终端会话。创建的终端可被前端页面查看和操作，Agent始终可直接操作。终端尺寸固定，不随页面查看尺寸变化。",
+			Description: "打开一个新的命令行终端（Shell），用于执行命令行操作。终端尺寸固定，创建后即可发送命令并获取输出。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -95,7 +95,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "send_input",
-			Description: "向指定终端发送输入。支持文本输入和键盘模拟输入（方向键、Ctrl、Alt、Esc等），可用于操作TUI程序。",
+			Description: "向指定终端发送输入，执行命令或模拟按键操作。支持直接输入文本（如命令字符串）或模拟特殊按键（方向键、Ctrl+C、Esc、Enter等）。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -108,7 +108,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "get_output",
-			Description: "获取指定终端的最后N行输出内容。自动去除ANSI色彩控制符，避免干扰Agent理解。",
+			Description: "获取指定终端命令执行后的输出内容（最后N行）。自动去除ANSI色彩控制符，返回纯文本结果。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -131,7 +131,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "close",
-			Description: "关闭指定的终端会话。Agent使用完毕后应主动关闭终端。",
+			Description: "关闭指定的终端会话。使用完毕后应主动关闭以释放资源。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
