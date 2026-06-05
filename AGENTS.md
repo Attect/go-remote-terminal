@@ -60,18 +60,26 @@ GRT_TOKEN=your-secure-token ./go-remote-terminal
 
 ### 工具列表
 
-所有工具名以 `` 为前缀：
+工具名无前缀：
 
 | 工具 | 说明 |
 |------|------|
-| `environment_info` | 返回默认 shell、OS、架构 |
-| `create` | 创建终端，参数：name, opener, purpose, rows(默认40), cols(默认120), working_directory |
-| `list` | 列出所有活跃终端 |
-| `send_input` | 发送输入，`input_type`: text / key，`submit`: 是否自动回车执行（仅text有效，默认false） |
-| `get_output` | 获取最后 N 行输出（去 ANSI） |
-| `get_screen` | 获取当前可见屏幕（VT 模拟器渲染，去 ANSI） |
-| `close` | 关闭终端 |
-| `rename` | 重命名终端 |
+| `environment_info` | 获取当前运行环境的基础信息（OS、架构、默认Shell）。建议首次使用终端前调用 |
+| `create` | **创建终端（执行命令的第一步）**。当你需要在服务器上执行命令、运行脚本或进行Shell交互时，必须首先调用此工具 |
+| `list` | 列出所有活跃终端，用于查看已有会话 |
+| `send_input` | **发送命令并执行**。创建终端后，使用此工具发送命令文本（如 `ls -la`）或模拟按键（Ctrl+C、Enter等） |
+| `get_output` | **获取命令输出**。发送命令后，调用此工具读取返回的文本结果（去ANSI，默认最后50行） |
+| `get_screen` | 获取终端当前可见屏幕（适用于 top/vim 等TUI程序），自动去除ANSI控制符 |
+| `close` | 关闭终端并释放资源，操作完成后应主动调用 |
+| `rename` | 重命名终端，便于管理多个会话 |
+
+### 使用工作流
+
+AI Agent 执行命令的标准流程：
+1. `terminal_create` — 创建终端（指定 working_directory、opener、purpose）
+2. `terminal_send_input` — 发送命令（input_type=text, submit=true）
+3. `terminal_get_output` — 读取输出结果
+4. `terminal_close` — 操作完成后关闭终端释放资源
 
 ### MCP 终端与普通终端的区别
 

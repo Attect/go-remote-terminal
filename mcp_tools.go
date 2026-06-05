@@ -62,7 +62,7 @@ func AllMCPTools() []MCPTool {
 	return []MCPTool{
 		{
 			Name:        "environment_info",
-			Description: "获取当前运行环境的基础信息，包括默认shell路径、操作系统、架构等",
+			Description: "获取当前运行环境的基础信息，包括操作系统、架构、默认Shell路径等。建议在首次使用终端功能前调用，以了解目标环境的Shell类型和系统信息。",
 			InputSchema: ToolSchema{
 				Type:       "object",
 				Properties: map[string]ToolProperty{},
@@ -71,7 +71,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "create",
-			Description: "打开一个新的命令行终端（Shell），用于执行命令行操作。终端尺寸固定，创建后即可发送命令并获取输出。",
+			Description: "创建并启动一个新的命令行终端（Shell）。当你需要在服务器上执行命令、运行脚本、操作文件系统或进行任何Shell交互时，必须首先调用此工具创建终端。创建成功后，使用 send_input 发送命令，使用 get_output 获取结果。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -87,7 +87,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "list",
-			Description: "查询当前已启用的所有终端会话列表",
+			Description: "列出当前所有活跃的终端会话。当你不确定有哪些终端可用，或需要查看之前创建的终端时调用。",
 			InputSchema: ToolSchema{
 				Type:       "object",
 				Properties: map[string]ToolProperty{},
@@ -96,7 +96,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "send_input",
-			Description: "向指定终端发送输入，执行命令或模拟按键操作。支持直接输入文本（如命令字符串）或模拟特殊按键（方向键、Ctrl+C、Esc、Enter等）。当 input_type 为 text 时，可通过 submit 参数控制是否在输入内容后自动追加回车执行（默认 false，仅输入不执行）。",
+			Description: "向已创建的终端发送输入并执行命令。支持发送普通文本命令（如 `ls -la`）或模拟特殊按键（如 Ctrl+C、Enter）。创建终端后，使用此工具来执行具体的操作。当 input_type 为 text 时，可通过 submit 参数控制是否在输入内容后自动追加回车执行。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -110,7 +110,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "get_output",
-			Description: "获取指定终端命令执行后的输出内容（最后N行）。自动去除ANSI色彩控制符，返回纯文本结果。",
+			Description: "获取终端命令执行的输出结果（自动去除ANSI控制符）。在通过 send_input 发送命令后，调用此工具读取命令返回的文本输出。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -122,7 +122,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "get_screen",
-			Description: "获取指定终端当前可见屏幕的渲染内容。适用于TUI程序（如top/htop/vim等），自动去除ANSI色彩控制符。",
+			Description: "获取终端当前可见屏幕的完整渲染内容（适用于 top、vim 等TUI程序）。当命令输出是交互式界面而非普通文本流时，使用此工具代替 get_output。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -133,7 +133,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "close",
-			Description: "关闭指定的终端会话。使用完毕后应主动关闭以释放资源。",
+			Description: "关闭指定的终端会话并释放资源。操作完成后应主动调用，避免资源泄漏。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
@@ -144,7 +144,7 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "rename",
-			Description: "重命名指定的终端会话。可在不同流程中更新终端名称以便区分。",
+			Description: "重命名终端会话，便于区分和管理多个终端。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
