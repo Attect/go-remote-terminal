@@ -95,13 +95,14 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "send_input",
-			Description: "向指定终端发送输入，执行命令或模拟按键操作。支持直接输入文本（如命令字符串）或模拟特殊按键（方向键、Ctrl+C、Esc、Enter等）。",
+			Description: "向指定终端发送输入，执行命令或模拟按键操作。支持直接输入文本（如命令字符串）或模拟特殊按键（方向键、Ctrl+C、Esc、Enter等）。当 input_type 为 text 时，可通过 submit 参数控制是否在输入内容后自动追加回车执行（默认 false，仅输入不执行）。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
 					"session_id": {Type: "string", Description: "终端会话ID"},
 					"input_type": {Type: "string", Description: "输入类型: text 或 key", Enum: []string{"text", "key"}},
 					"data":       {Type: "string", Description: "输入内容。text类型时直接发送文本；key类型时填写键名如 Enter, ArrowUp, Ctrl+C, Escape 等"},
+					"submit":     {Type: "boolean", Description: "（仅 text 类型有效）是否在输入内容后自动追加回车执行。true=输入并执行；false=仅输入不执行（默认）", Default: false},
 				},
 				Required: []string{"session_id", "input_type", "data"},
 			},
@@ -248,6 +249,7 @@ func handleTerminalSendInput(pool *SessionPool, args map[string]interface{}) Too
 	sessionID := getStringArg(args, "session_id")
 	inputType := getStringArg(args, "input_type")
 	data := getStringArg(args, "data")
+	submit := getBoolArg(args, "submit", false)
 
 	if sessionID == "" {
 		return errorResult("session_id 是必填参数")
@@ -269,6 +271,9 @@ func handleTerminalSendInput(pool *SessionPool, args map[string]interface{}) Too
 	switch inputType {
 	case "text":
 		inputData = []byte(data)
+		if submit {
+			inputData = append(inputData, '\r')
+		}
 	case "key":
 		seq, err := ParseKeyInput(data)
 		if err != nil {
@@ -400,6 +405,32 @@ func getIntArg(args map[string]interface{}, key string, defaultVal int) int {
 		case json.Number:
 			if n, err := val.Int64(); err == nil {
 				return int(n)
+			}
+		}
+	}
+	return defaultVal
+}
+
+func getBoolArg(args map[string]interface{}, key string, defaultVal bool) bool {
+	if v, ok := args[key]; ok {
+		switch val := v.(type) {
+		case bool:
+			return val
+		case string:
+			lower := strings.ToLower(val)
+			if lower == "true" || lower == "1" || lower == "yes" {
+				return true
+			}
+			if lower == "false" || lower == "0" || lower == "no" {
+				return false
+			}
+		case float64:
+			return val != 0
+		case int:
+			return val != 0
+		case json.Number:
+			if n, err := val.Int64(); err == nil {
+				return n != 0
 			}
 		}
 	}
