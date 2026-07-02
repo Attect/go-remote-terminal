@@ -6,36 +6,38 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ==================== MCP Tool 定义 ====================
 
 // MCPTool 表示一个MCP工具
 type MCPTool struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema ToolSchema  `json:"inputSchema"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	InputSchema ToolSchema `json:"inputSchema"`
 }
 
 // ToolSchema JSON Schema for tool input
 type ToolSchema struct {
-	Type       string                 `json:"type"`
+	Type       string                  `json:"type"`
 	Properties map[string]ToolProperty `json:"properties"`
-	Required   []string               `json:"required"`
+	Required   []string                `json:"required"`
 }
 
 // ToolProperty JSON Schema property
 type ToolProperty struct {
-	Type        string `json:"type,omitempty"`
-	Description string `json:"description,omitempty"`
-	Enum        []string `json:"enum,omitempty"`
+	Type        string      `json:"type,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Enum        []string    `json:"enum,omitempty"`
 	Default     interface{} `json:"default,omitempty"`
 }
 
 // ToolResult 工具调用结果
 type ToolResult struct {
-	Content []ToolContent `json:"content"`
-	IsError bool          `json:"isError,omitempty"`
+	Content           []ToolContent `json:"content"`
+	StructuredContent interface{}   `json:"structuredContent,omitempty"`
+	IsError           bool          `json:"isError,omitempty"`
 }
 
 // ToolContent 结果内容项
@@ -50,6 +52,13 @@ func textResult(text string) ToolResult {
 	}
 }
 
+func structuredTextResult(text string, structured interface{}) ToolResult {
+	return ToolResult{
+		Content:           []ToolContent{{Type: "text", Text: text}},
+		StructuredContent: structured,
+	}
+}
+
 func errorResult(errMsg string) ToolResult {
 	return ToolResult{
 		Content: []ToolContent{{Type: "text", Text: errMsg}},
@@ -58,6 +67,7 @@ func errorResult(errMsg string) ToolResult {
 }
 
 // AllMCPTools 返回所有可用的MCP工具定义
+// create 工具的描述会根据当前系统检测到的可用Shell动态生成
 func AllMCPTools() []MCPTool {
 	return []MCPTool{
 		{
@@ -71,18 +81,19 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "create",
-			Description: "创建并启动一个新的命令行终端（Shell）。当你需要在服务器上执行命令、运行脚本、操作文件系统或进行任何Shell交互时，必须首先调用此工具创建终端。创建成功后，使用 send_input 发送命令，使用 get_output 获取结果。",
+			Description: "创建并启动一个新的命令行终端（Shell）。当你需要在服务器上执行命令、运行脚本、操作文件系统或进行任何Shell交互时，必须首先调用此工具创建终端。创建成功后，使用 send_input 发送命令，使用 get_output 获取结果。\\n\\n" + GetAvailableShellsDescription(),
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
-					"name":    {Type: "string", Description: "终端名称（可选，默认自动生成）"},
-					"opener":  {Type: "string", Description: "打开者名称（如AI Agent名称）"},
-					"purpose": {Type: "string", Description: "打开目的/用途描述"},
-					"rows":               {Type: "integer", Description: "终端行数（可选，默认40）", Default: 40},
-					"cols":               {Type: "integer", Description: "终端列数（可选，默认120）", Default: 120},
-					"working_directory":  {Type: "string", Description: "终端初始工作目录"},
+					"name":              {Type: "string", Description: "终端名称（必填，建议使用中文名称，如'编译环境'、'文件查看'）"},
+					"opener":            {Type: "string", Description: "打开者名称（如AI Agent名称）"},
+					"purpose":           {Type: "string", Description: "打开目的/用途描述"},
+					"shell":             {Type: "string", Description: "要使用的Shell名称标识（可选），如 pwsh、cmd、bash、zsh 等。若不指定，则使用系统默认Shell。可用Shell列表见工具描述。", Default: ""},
+					"rows":              {Type: "integer", Description: "终端行数（可选，默认40）", Default: 40},
+					"cols":              {Type: "integer", Description: "终端列数（可选，默认120）", Default: 120},
+					"working_directory": {Type: "string", Description: "终端初始工作目录"},
 				},
-				Required: []string{"opener", "purpose", "working_directory"},
+				Required: []string{"name", "opener", "purpose", "working_directory"},
 			},
 		},
 		{
@@ -96,37 +107,68 @@ func AllMCPTools() []MCPTool {
 		},
 		{
 			Name:        "send_input",
-			Description: "向已创建的终端发送输入并执行命令。支持发送普通文本命令（如 `ls -la`）或模拟特殊按键（如 Ctrl+C、Enter）。创建终端后，使用此工具来执行具体的操作。当 input_type 为 text 时，可通过 submit 参数控制是否在输入内容后自动追加回车执行。",
+			Description: "向已创建的终端发送原始输入（按键或文本），不自动回车、不等待输出。适合逐键输入、交互式程序操作和需要精确控制输入流的场景。若要执行一条命令，请使用 send_command。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
 					"session_id": {Type: "string", Description: "终端会话ID"},
 					"input_type": {Type: "string", Description: "输入类型: text 或 key", Enum: []string{"text", "key"}},
 					"data":       {Type: "string", Description: "输入内容。text类型时直接发送文本；key类型时填写键名如 Enter, ArrowUp, Ctrl+C, Escape 等"},
-					"submit":     {Type: "boolean", Description: "（仅 text 类型有效）是否在输入内容后自动追加回车执行。true=输入并执行；false=仅输入不执行（默认）", Default: false},
 				},
 				Required: []string{"session_id", "input_type", "data"},
 			},
 		},
 		{
-			Name:        "get_output",
-			Description: "获取终端命令执行的输出结果（自动去除ANSI控制符）。在通过 send_input 发送命令后，调用此工具读取命令返回的文本输出。",
+			Name:        "send_command",
+			Description: "发送一条命令并立即回车执行，但不等待输出。适合已经决定执行命令、随后再用 wait_output 观察结果的场景，可显著降低误把等待和发送绑定在一起的风险。返回结构化确认信息，推荐后续调用 wait_output。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
 					"session_id": {Type: "string", Description: "终端会话ID"},
-					"lines":      {Type: "integer", Description: "获取行数（可选，默认50）", Default: 50},
+					"command":    {Type: "string", Description: "要发送的命令，会自动追加回车执行"},
+				},
+				Required: []string{"session_id", "command"},
+			},
+		},
+		{
+			Name:        "wait_output",
+			Description: "不发送任何输入，只等待指定终端输出静默后返回当前稳定视图。适合 send_command 启动后的长命令、构建、下载等任务。返回 text 摘要和 structuredContent(output.v1)。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"session_id":        {Type: "string", Description: "终端会话ID"},
+					"wait_timeout_ms":   {Type: "integer", Description: "等待超时时间（毫秒），默认30000", Default: 30000},
+					"idle_threshold_ms": {Type: "integer", Description: "输出静默阈值（毫秒），默认1000", Default: 1000},
+					"lines":             {Type: "integer", Description: "返回的最大行数（默认80）", Default: 80},
+					"raw_output":        {Type: "boolean", Description: "是否返回原始输出清理结果。默认false", Default: false},
+					"full_output":       {Type: "boolean", Description: "是否尽量返回RingBuffer中的完整输出。默认false", Default: false},
+				},
+				Required: []string{"session_id"},
+			},
+		},
+		{
+			Name:        "get_output",
+			Description: "获取终端命令执行的输出结果。默认返回最终屏幕或去重后的尾部稳定文本，并附带截断、行数、动态刷新检测等元信息；同时提供 structuredContent 便于AI解析。",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]ToolProperty{
+					"session_id":  {Type: "string", Description: "终端会话ID"},
+					"lines":       {Type: "integer", Description: "获取行数（可选，默认50）", Default: 50},
+					"raw_output":  {Type: "boolean", Description: "是否返回完整原始输出清理结果。默认false，返回上下文友好的稳定视图", Default: false},
+					"full_output": {Type: "boolean", Description: "是否尽量返回RingBuffer中的完整输出。默认false；true时自动启用raw_output并取消默认行数/字符截断", Default: false},
 				},
 				Required: []string{"session_id"},
 			},
 		},
 		{
 			Name:        "get_screen",
-			Description: "获取终端当前可见屏幕的完整渲染内容（适用于 top、vim 等TUI程序）。当命令输出是交互式界面而非普通文本流时，使用此工具代替 get_output。",
+			Description: "获取终端当前可见屏幕的完整渲染内容（适用于 top、vim 等TUI程序），并附带输出元信息与 structuredContent。",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]ToolProperty{
-					"session_id": {Type: "string", Description: "终端会话ID"},
+					"session_id":  {Type: "string", Description: "终端会话ID"},
+					"raw_output":  {Type: "boolean", Description: "是否回退返回完整原始输出清理结果。默认false，优先返回最终屏幕", Default: false},
+					"full_output": {Type: "boolean", Description: "是否尽量返回RingBuffer中的完整输出。默认false；true时自动启用raw_output并取消默认行数/字符截断", Default: false},
 				},
 				Required: []string{"session_id"},
 			},
@@ -170,6 +212,10 @@ func HandleMCPTool(pool *SessionPool, name string, args map[string]interface{}) 
 		return handleTerminalList(pool)
 	case "send_input":
 		return handleTerminalSendInput(pool, args)
+	case "send_command":
+		return handleTerminalSendCommand(pool, args)
+	case "wait_output":
+		return handleTerminalWaitOutput(pool, args)
 	case "get_output":
 		return handleTerminalGetOutput(pool, args)
 	case "get_screen":
@@ -187,13 +233,22 @@ func handleTerminalEnvironmentInfo() ToolResult {
 	shell := GetDefaultShell()
 	info := fmt.Sprintf("操作系统: %s\n架构: %s\n默认Shell: %s\nShell参数: %v",
 		runtime.GOOS, runtime.GOARCH, shell.Path, shell.Args)
-	return textResult(info)
+	return structuredTextResult(info, map[string]interface{}{
+		"tool": "environment_info",
+		"os":   runtime.GOOS,
+		"arch": runtime.GOARCH,
+		"shell": map[string]interface{}{
+			"path": shell.Path,
+			"args": shell.Args,
+		},
+	})
 }
 
 func handleTerminalCreate(pool *SessionPool, args map[string]interface{}) ToolResult {
 	name := getStringArg(args, "name")
 	opener := getStringArg(args, "opener")
 	purpose := getStringArg(args, "purpose")
+	shellName := getStringArg(args, "shell")
 	rows := getIntArg(args, "rows", 40)
 	cols := getIntArg(args, "cols", 120)
 	workDir := getStringArg(args, "working_directory")
@@ -205,14 +260,34 @@ func handleTerminalCreate(pool *SessionPool, args map[string]interface{}) ToolRe
 		return errorResult("working_directory 是必填参数")
 	}
 
-	session, err := pool.CreateWithMeta(name, "", opener, purpose, uint16(rows), uint16(cols), workDir)
+	session, err := pool.CreateWithMeta(name, shellName, opener, purpose, uint16(rows), uint16(cols), workDir)
 	if err != nil {
 		return errorResult(fmt.Sprintf("创建终端失败: %v", err))
 	}
 
-	result := fmt.Sprintf("终端创建成功\n会话ID: %s\n名称: %s\n打开者: %s\n目的: %s\n尺寸: %dx%d\n工作目录: %s",
-		session.ID, session.Name, session.Opener, session.Purpose, rows, cols, workDir)
-	return textResult(result)
+	shellInfo := "默认Shell"
+	if shellName != "" {
+		if s := FindAvailableShellByName(shellName); s != nil {
+			shellInfo = fmt.Sprintf("%s (%s)", s.DisplayName, s.Path)
+		} else {
+			shellInfo = shellName
+		}
+	}
+
+	result := fmt.Sprintf("终端创建成功\n会话ID: %s\n名称: %s\n打开者: %s\n目的: %s\nShell: %s\n尺寸: %dx%d\n工作目录: %s",
+		session.ID, session.Name, session.Opener, session.Purpose, shellInfo, rows, cols, workDir)
+	return structuredTextResult(result, map[string]interface{}{
+		"tool":       "create",
+		"sessionId":  session.ID,
+		"name":       session.Name,
+		"opener":     session.Opener,
+		"purpose":    session.Purpose,
+		"shell":      shellInfo,
+		"rows":       rows,
+		"cols":       cols,
+		"workingDir": workDir,
+		"status":     string(session.Status),
+	})
 }
 
 func handleTerminalList(pool *SessionPool) ToolResult {
@@ -247,14 +322,17 @@ func handleTerminalList(pool *SessionPool) ToolResult {
 		sb.WriteString(fmt.Sprintf("  页面连接数: %d\n", connCount))
 		sb.WriteString("\n")
 	}
-	return textResult(sb.String())
+	return structuredTextResult(sb.String(), map[string]interface{}{
+		"tool":     "list",
+		"count":    len(sessions),
+		"sessions": sessions,
+	})
 }
 
 func handleTerminalSendInput(pool *SessionPool, args map[string]interface{}) ToolResult {
 	sessionID := getStringArg(args, "session_id")
 	inputType := getStringArg(args, "input_type")
 	data := getStringArg(args, "data")
-	submit := getBoolArg(args, "submit", false)
 
 	if sessionID == "" {
 		return errorResult("session_id 是必填参数")
@@ -276,9 +354,6 @@ func handleTerminalSendInput(pool *SessionPool, args map[string]interface{}) Too
 	switch inputType {
 	case "text":
 		inputData = []byte(data)
-		if submit {
-			inputData = append(inputData, '\r')
-		}
 	case "key":
 		seq, err := ParseKeyInput(data)
 		if err != nil {
@@ -292,12 +367,112 @@ func handleTerminalSendInput(pool *SessionPool, args map[string]interface{}) Too
 	if err := session.MCPWrite(inputData); err != nil {
 		return errorResult(fmt.Sprintf("发送输入失败: %v", err))
 	}
-	return textResult("输入已发送")
+
+	return structuredTextResult("输入已发送", map[string]interface{}{
+		"schema":    "grt.mcp.input.v1",
+		"kind":      "terminal_input",
+		"tool":      "send_input",
+		"sessionId": sessionID,
+		"inputType": inputType,
+		"sent":      true,
+		"nextTool":  "get_screen",
+	})
+}
+
+func handleTerminalSendCommand(pool *SessionPool, args map[string]interface{}) ToolResult {
+	sessionID := getStringArg(args, "session_id")
+	command := getStringArg(args, "command")
+
+	if sessionID == "" {
+		return errorResult("session_id 是必填参数")
+	}
+	if command == "" {
+		return errorResult("command 是必填参数")
+	}
+
+	session, ok := pool.Get(sessionID)
+	if !ok {
+		return errorResult("终端不存在")
+	}
+
+	session.mu.Lock()
+	if session.Status == SessionExited {
+		session.mu.Unlock()
+		return errorResult("终端进程已退出")
+	}
+	session.mu.Unlock()
+
+	if err := session.MCPWriteSubmit([]byte(command)); err != nil {
+		return errorResult(fmt.Sprintf("发送命令失败: %v", err))
+	}
+
+	view := RenderMCPOutput(session, session.GetOutput(), mcpOutputOptions(20, false, false))
+	structured := buildMCPOutputPayload("send_command", sessionID, command, view)
+	structured.Completed = false
+	structured.Wait = false
+	structured.Suggestion.PreferredTool = "wait_output"
+	structured.Suggestion.Reason = "命令已发送，下一步应等待输出而不是重复发送"
+	structured.Suggestion.ShortHint = "先 wait_output，再看结果"
+
+	return structuredTextResult("命令已发送，请使用 wait_output 观察结果。", structured)
+}
+
+func handleTerminalWaitOutput(pool *SessionPool, args map[string]interface{}) ToolResult {
+	sessionID := getStringArg(args, "session_id")
+	waitTimeoutMs := getIntArg(args, "wait_timeout_ms", 30000)
+	idleThresholdMs := getIntArg(args, "idle_threshold_ms", 1000)
+	lines := getIntArg(args, "lines", 80)
+	rawOutput := getBoolArg(args, "raw_output", false)
+	fullOutput := getBoolArg(args, "full_output", false)
+
+	if sessionID == "" {
+		return errorResult("session_id 是必填参数")
+	}
+
+	session, ok := pool.Get(sessionID)
+	if !ok {
+		return errorResult("终端不存在")
+	}
+
+	session.mu.Lock()
+	if session.Status == SessionExited {
+		session.mu.Unlock()
+		return errorResult("终端进程已退出")
+	}
+	session.mu.Unlock()
+
+	maxWait := time.Duration(waitTimeoutMs) * time.Millisecond
+	idleThreshold := time.Duration(idleThresholdMs) * time.Millisecond
+	if maxWait <= 0 {
+		maxWait = 30 * time.Second
+	}
+	if idleThreshold <= 0 {
+		idleThreshold = time.Second
+	}
+	if idleThreshold > maxWait {
+		idleThreshold = maxWait / 4
+		if idleThreshold < 100*time.Millisecond {
+			idleThreshold = 100 * time.Millisecond
+		}
+	}
+
+	_, completed := session.WaitForIdle(idleThreshold, maxWait)
+	view := RenderMCPOutput(session, session.GetOutput(), mcpOutputOptions(lines, rawOutput, fullOutput))
+	structured := buildMCPOutputPayload("wait_output", sessionID, "", view)
+	structured.Completed = completed
+	structured.WaitTimeout = waitTimeoutMs
+
+	if completed {
+		return structuredTextResult(FormatMCPOutput("终端已静默，当前输出：", view), structured)
+	}
+	return structuredTextResult(FormatMCPOutput("等待超时，当前输出：", view)+"\n[提示：任务可能仍在运行，可继续调用 wait_output 或 get_screen]", structured)
 }
 
 func handleTerminalGetOutput(pool *SessionPool, args map[string]interface{}) ToolResult {
 	sessionID := getStringArg(args, "session_id")
 	lines := getIntArg(args, "lines", 50)
+	rawOutput := getBoolArg(args, "raw_output", false)
+	fullOutput := getBoolArg(args, "full_output", false)
 
 	if sessionID == "" {
 		return errorResult("session_id 是必填参数")
@@ -309,27 +484,14 @@ func handleTerminalGetOutput(pool *SessionPool, args map[string]interface{}) Too
 	}
 
 	output := session.GetOutput()
-	clean := StripANSI(output)
-
-	// 按行分割，取最后N行
-	allLines := strings.Split(clean, "\n")
-	// 过滤空行并处理\r
-	var filtered []string
-	for _, line := range allLines {
-		line = strings.TrimRight(line, "\r")
-		filtered = append(filtered, line)
-	}
-
-	start := 0
-	if len(filtered) > lines {
-		start = len(filtered) - lines
-	}
-	result := strings.Join(filtered[start:], "\n")
-	return textResult(result)
+	view := RenderMCPOutput(session, output, mcpOutputOptions(lines, rawOutput, fullOutput))
+	return structuredTextResult(FormatMCPOutput("终端输出：", view), buildMCPOutputPayload("get_output", sessionID, "", view))
 }
 
 func handleTerminalGetScreen(pool *SessionPool, args map[string]interface{}) ToolResult {
 	sessionID := getStringArg(args, "session_id")
+	rawOutput := getBoolArg(args, "raw_output", false)
+	fullOutput := getBoolArg(args, "full_output", false)
 
 	if sessionID == "" {
 		return errorResult("session_id 是必填参数")
@@ -340,15 +502,20 @@ func handleTerminalGetScreen(pool *SessionPool, args map[string]interface{}) Too
 		return errorResult("终端不存在")
 	}
 
+	if rawOutput || fullOutput {
+		view := RenderMCPOutput(session, session.GetOutput(), mcpOutputOptions(200, rawOutput, fullOutput))
+		return structuredTextResult(FormatMCPOutput("终端原始输出：", view), buildMCPOutputPayload("get_screen", sessionID, "", view))
+	}
+
 	if session.vtScreen != nil {
-		screen := session.vtScreen.GetScreen()
-		return textResult(screen)
+		view := RenderMCPOutput(session, []byte(session.vtScreen.GetScreen()), MCPOutputOptions{Lines: int(session.FixedRows), PreferScreen: false})
+		view.Meta.FromScreen = true
+		return structuredTextResult(FormatMCPOutput("终端当前屏幕：", view), buildMCPOutputPayload("get_screen", sessionID, "", view))
 	}
 
 	// 如果没有VT模拟器，回退到获取输出最后N行
-	output := session.GetOutput()
-	clean := StripANSI(output)
-	return textResult(clean)
+	view := RenderMCPOutput(session, session.GetOutput(), MCPOutputOptions{Lines: 80, PreferScreen: false})
+	return structuredTextResult(FormatMCPOutput("终端当前输出：", view), buildMCPOutputPayload("get_screen", sessionID, "", view))
 }
 
 func handleTerminalClose(pool *SessionPool, args map[string]interface{}) ToolResult {
@@ -361,7 +528,11 @@ func handleTerminalClose(pool *SessionPool, args map[string]interface{}) ToolRes
 	if err := pool.Close(sessionID); err != nil {
 		return errorResult(fmt.Sprintf("关闭终端失败: %v", err))
 	}
-	return textResult("终端已关闭")
+	return structuredTextResult("终端已关闭", map[string]interface{}{
+		"tool":      "close",
+		"sessionId": sessionID,
+		"closed":    true,
+	})
 }
 
 func handleTerminalRename(pool *SessionPool, args map[string]interface{}) ToolResult {
@@ -375,7 +546,12 @@ func handleTerminalRename(pool *SessionPool, args map[string]interface{}) ToolRe
 	if err := pool.Rename(sessionID, newName); err != nil {
 		return errorResult(fmt.Sprintf("重命名失败: %v", err))
 	}
-	return textResult(fmt.Sprintf("终端已重命名为: %s", newName))
+	return structuredTextResult(fmt.Sprintf("终端已重命名为: %s", newName), map[string]interface{}{
+		"tool":      "rename",
+		"sessionId": sessionID,
+		"newName":   newName,
+		"renamed":   true,
+	})
 }
 
 // ==================== 参数辅助函数 ====================
@@ -440,4 +616,72 @@ func getBoolArg(args map[string]interface{}, key string, defaultVal bool) bool {
 		}
 	}
 	return defaultVal
+}
+
+func mcpOutputOptions(lines int, rawOutput, fullOutput bool) MCPOutputOptions {
+	if fullOutput {
+		return MCPOutputOptions{Lines: 1 << 30, MaxChars: 1 << 30, Raw: true, PreferScreen: false}
+	}
+	return MCPOutputOptions{Lines: lines, Raw: rawOutput, PreferScreen: true}
+}
+
+func buildMCPOutputPayload(toolName, sessionID, command string, view MCPOutputView) MCPOutputEnvelope {
+	return MCPOutputEnvelope{
+		Schema:    "grt.mcp.output.v1",
+		Kind:      "terminal_output",
+		Tool:      toolName,
+		SessionID: sessionID,
+		Command:   command,
+		Completed: !view.Meta.Truncated,
+		Output:    view,
+		Suggestion: MCPOutputSuggestion{
+			PreferredTool: preferredMCPTool(view),
+			Reason:        suggestedMCPReason(view),
+			ShortHint:     suggestedMCPHint(view),
+		},
+	}
+}
+
+func preferredMCPTool(view MCPOutputView) string {
+	if view.Meta.FromScreen {
+		return "get_screen"
+	}
+	if view.Meta.DynamicDetected {
+		return "wait_output"
+	}
+	if view.Meta.Truncated {
+		return "wait_output"
+	}
+	return "get_output"
+}
+
+func suggestedMCPReason(view MCPOutputView) string {
+	if view.Meta.FromScreen {
+		return "当前是最终屏幕视图，最适合观察 TUI 状态"
+	}
+	if view.Meta.DynamicDetected {
+		return "检测到动态刷新或进度条，建议只等待稳定输出"
+	}
+	if view.Meta.Truncated {
+		return "结果已截断，建议继续等待或获取更完整输出"
+	}
+	return "当前输出已经稳定"
+}
+
+func suggestedMCPHint(view MCPOutputView) string {
+	if view.Meta.FromScreen {
+		return "优先看屏幕最后一帧"
+	}
+	if view.Meta.DynamicDetected {
+		return "先用 wait_output 收敛，再决定是否 full_output"
+	}
+	if view.Meta.Truncated {
+		return "若要完整日志，使用 full_output=true"
+	}
+	return "继续使用 get_output 即可"
+}
+
+// appendInputNewline 追加回车符（所有平台统一使用 \r，由 MCPWriteSubmit 负责处理平台差异）
+func appendInputNewline(data []byte) []byte {
+	return append(data, '\r')
 }

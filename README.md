@@ -2,6 +2,13 @@
 
 Go Remote Terminal 是一个轻量级、跨平台的 Web 终端服务程序。只需在目标机器上运行一个二进制文件，即可通过浏览器从任意设备远程访问本地 Shell，无需安装任何客户端。
 
+## v1.1.0 更新亮点
+
+- MCP 工具体系重构为 `send_command` → `wait_output` → `get_output/get_screen`，降低重复发送命令和上下文浪费风险。
+- MCP 输出新增 `structuredContent`，统一使用 `grt.mcp.output.v1` schema，便于 AI 读取 `output.text`、`output.meta` 和 `suggestion`。
+- 默认输出会收敛动态刷新、进度条、回车覆盖等终端表现，优先返回稳定视图或最终屏幕。
+- `send_input` 收缩为纯交互输入工具，仅用于按键/文本直写，不再承担提交命令或等待输出职责。
+
 ## 功能特性
 
 - **跨平台支持**：支持 Windows 10/11、macOS、Linux。可在任意平台上交叉编译出所有目标平台的二进制文件。
@@ -107,9 +114,11 @@ GOOS=windows GOARCH=amd64 go build -o dist/go-remote-terminal-windows-amd64.exe
 | `environment_info` | 获取环境信息（默认 shell、操作系统、架构） |
 | `create` | 创建终端（参数：name, opener, purpose, rows, cols） |
 | `list` | 查询所有已启用的终端 |
-| `send_input` | 发送输入（`input_type`: text / key，支持方向键、Ctrl、Alt 等） |
-| `get_output` | 获取最后 N 行输出（自动去除 ANSI 控制符） |
-| `get_screen` | 获取当前可见屏幕内容（适用于 TUI，自动去除 ANSI 控制符） |
+| `send_input` | 发送输入（`input_type`: text / key，支持方向键、Ctrl、Alt 等；可返回 structuredContent） |
+| `send_command` | 发送命令并立即执行，不等待结果 |
+| `wait_output` | 不发送输入，只等待已有任务输出静默并返回结构化稳定视图 |
+| `get_output` | 获取更适合AI消费的稳定输出视图（自动去除 ANSI 控制符，并返回 structuredContent） |
+| `get_screen` | 获取当前可见屏幕内容（适用于 TUI，自动去除 ANSI 控制符，并返回 structuredContent） |
 | `close` | 关闭终端 |
 | `rename` | 重命名终端 |
 
@@ -118,6 +127,16 @@ GOOS=windows GOARCH=amd64 go build -o dist/go-remote-terminal-windows-amd64.exe
 - MCP 终端创建后**尺寸固定**（默认 40×120），不随前端页面查看尺寸变化
 - Agent 输入**直接写 PTY**，不参与 WebSocket 用户的焦点竞争
 - MCP 创建的终端**可被前端页面查看和连接**，页面用户需申请焦点后才能输入
+- 对于长时间运行的命令，优先使用 `send_command` 启动后，再使用 `wait_output` 或 `get_screen` 观察进度，避免重复发送命令
+- 输出工具会同时返回文本摘要和 `structuredContent`，其中 `schema=grt.mcp.output.v1`，AI 可优先读取 `output.text`、`output.meta` 和 `suggestion`
+
+### MCP 推荐工作流
+
+1. `create` 创建固定尺寸终端
+2. `send_command` 发送命令并立即返回
+3. `wait_output` 等待输出静默，读取结构化稳定视图
+4. `get_screen` 查看 TUI 或动态刷新命令的最终屏幕
+5. `send_input` 仅用于交互式程序中的按键/文本输入
 
 ## 系统架构
 

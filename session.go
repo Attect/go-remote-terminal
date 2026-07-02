@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,6 +183,10 @@ type Session struct {
 	Opener    string    // 打开者名称（MCP）
 	Purpose   string    // 打开目的（MCP）
 	vtScreen  *VTScreen // 虚拟终端屏幕（非nil时启用VT模拟）
+
+	// 输出静默检测相关
+	outMu          sync.Mutex
+	lastOutputTime time.Time
 }
 
 func newSession(id, name string, ptyProc PtyProcess, rows, cols uint16) *Session {
@@ -189,16 +196,17 @@ func newSession(id, name string, ptyProc PtyProcess, rows, cols uint16) *Session
 		cols = 80
 	}
 	return &Session{
-		ID:           id,
-		Name:         name,
-		Pty:          ptyProc,
-		CreatedAt:    now,
-		LastConnTime: now,
-		Status:       SessionActive,
-		outputBuf:    NewRingBuffer(defaultRingBufferSize),
-		conns:        make(map[*WSConn]*ConnInfo),
-		ptyRows:      rows,
-		ptyCols:      cols,
+		ID:             id,
+		Name:           name,
+		Pty:            ptyProc,
+		CreatedAt:      now,
+		LastConnTime:   now,
+		Status:         SessionActive,
+		outputBuf:      NewRingBuffer(defaultRingBufferSize),
+		conns:          make(map[*WSConn]*ConnInfo),
+		ptyRows:        rows,
+		ptyCols:        cols,
+		lastOutputTime: now,
 	}
 }
 
@@ -341,6 +349,11 @@ func (s *Session) WriteOutput(data []byte) {
 	}
 	_, _ = s.outputBuf.Write(data)
 
+	// 更新最后输出时间，供MCP wait模式检测静默
+	s.outMu.Lock()
+	s.lastOutputTime = time.Now()
+	s.outMu.Unlock()
+
 	// 同时更新虚拟终端屏幕
 	if s.vtScreen != nil {
 		s.vtScreen.Feed(data)
@@ -465,6 +478,8 @@ func (s *Session) ConnCount() int {
 }
 
 // MCPWrite 直接写入PTY，不经过焦点检查，供MCP Agent使用
+// 使用循环写入确保所有数据完整送达，避免底层缓冲区限制导致的长命令截断。
+// Windows ConPTY 下分批写入并添加短暂延迟，避免快速连续写入导致输入竞争和显示混乱。
 func (s *Session) MCPWrite(data []byte) error {
 	s.mu.Lock()
 	pty := s.Pty
@@ -472,8 +487,173 @@ func (s *Session) MCPWrite(data []byte) error {
 	if pty == nil {
 		return fmt.Errorf("PTY not available")
 	}
-	_, err := pty.Write(data)
-	return err
+	const chunkSize = 64
+	for len(data) > 0 {
+		chunk := data
+		if len(chunk) > chunkSize {
+			chunk = chunk[:chunkSize]
+		}
+		n, err := pty.Write(chunk)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("PTY write returned 0 bytes")
+		}
+		data = data[n:]
+		// Windows ConPTY 在快速连续写入时可能出现输入竞争，添加微小延迟给 PTY 处理时间
+		if runtime.GOOS == "windows" && len(data) > 0 {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+	return nil
+}
+
+// MCPWriteSubmit 发送数据后追加回车执行。
+// Windows ConPTY + PowerShell 下，先发送命令内容，等待 PSReadLine 完成语法高亮处理，
+// 再发送 \r，避免快速连续写入导致的显示残留（如多余的 m）和 \r\n 导致的多行提示符（>>）。
+func (s *Session) MCPWriteSubmit(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	// 分离命令内容和行尾（如果 data 末尾有 \r 或 \n）
+	content := data
+	for len(content) > 0 && (content[len(content)-1] == '\r' || content[len(content)-1] == '\n') {
+		content = content[:len(content)-1]
+	}
+	// 发送命令内容
+	if len(content) > 0 {
+		if err := s.MCPWrite(content); err != nil {
+			return err
+		}
+	}
+	// Windows 下给 PowerShell/PSReadLine 处理输入和语法高亮的时间
+	if runtime.GOOS == "windows" {
+		time.Sleep(50 * time.Millisecond)
+	}
+	// 发送回车
+	return s.MCPWrite([]byte{'\r'})
+}
+
+// WaitForIdle 等待PTY输出静默，返回期间累积的输出和是否成功完成
+// idleThreshold: 连续无输出的静默阈值
+// maxWait: 最大等待时间
+// 核心改进：只有在检测到输出至少有一次增长后，才开始用 idleThreshold 判断完成。
+// 这避免了 Shell 启动慢时，WaitForIdle 在命令输出出现前就提前返回。
+func (s *Session) WaitForIdle(idleThreshold, maxWait time.Duration) ([]byte, bool) {
+	start := time.Now()
+	deadline := start.Add(maxWait)
+
+	initialOutput := s.GetOutput()
+	hasGrown := false
+
+	// 先给命令一个最小启动窗口
+	minInitialWait := 100 * time.Millisecond
+	if time.Now().Add(minInitialWait).Before(deadline) {
+		time.Sleep(minInitialWait)
+	}
+
+	pollInterval := 50 * time.Millisecond
+	if idleThreshold < pollInterval {
+		pollInterval = idleThreshold / 4
+		if pollInterval < 10*time.Millisecond {
+			pollInterval = 10 * time.Millisecond
+		}
+	}
+
+	for {
+		now := time.Now()
+		if now.After(deadline) {
+			return s.GetOutput(), false
+		}
+
+		currentOutput := s.GetOutput()
+		if !hasGrown && len(currentOutput) > len(initialOutput) {
+			hasGrown = true
+		}
+
+		s.outMu.Lock()
+		lastOut := s.lastOutputTime
+		s.outMu.Unlock()
+
+		idle := now.Sub(lastOut)
+
+		if hasGrown {
+			// 已有输出增长，使用 idle 阈值判断完成
+			if idle >= idleThreshold {
+				// 只检查新增输出的最后一行是否像 shell 提示符
+				// 避免历史输出中的旧提示符导致误判，也避免长时间静默命令（如 Start-Sleep）被提前认为已完成
+				newOutput := currentOutput
+				if len(currentOutput) > len(initialOutput) {
+					newOutput = currentOutput[len(initialOutput):]
+				}
+				if lastLineLooksLikePrompt(string(CleanTerminalOutput(newOutput))) {
+					return currentOutput, true
+				}
+				// 不像提示符，继续等待直到 maxWait 超时
+				// 不再使用 3*idleThreshold 作为 fallback，避免误判长时间静默命令
+			}
+		} else {
+			// 一直没有输出增长，使用较长的无增长容忍时间（5秒）
+			// 给慢启动的 Shell（如 PowerShell）充分时间，也适用于长时间静默命令
+			if now.Sub(start) >= 5*time.Second {
+				return currentOutput, true
+			}
+		}
+
+		// 睡眠策略：有增长后按 idle 预计时间睡，无增长时快速轮询
+		var sleepUntil time.Time
+		if hasGrown {
+			sleepUntil = lastOut.Add(idleThreshold)
+		} else {
+			sleepUntil = now.Add(200 * time.Millisecond)
+		}
+		if sleepUntil.After(deadline) {
+			sleepUntil = deadline
+		}
+		remaining := sleepUntil.Sub(now)
+		if remaining > pollInterval {
+			remaining = pollInterval
+		}
+		if remaining > 0 {
+			time.Sleep(remaining)
+		} else {
+			time.Sleep(pollInterval)
+		}
+	}
+}
+
+// ExtractOutputSince 从当前outputBuf中截取自mark以来的新增输出
+// 如果mark已被RingBuffer覆盖，则返回全部当前输出，ok=false
+func (s *Session) ExtractOutputSince(mark []byte) (output []byte, ok bool) {
+	all := s.GetOutput()
+	if len(all) > len(mark) && bytes.Equal(all[:len(mark)], mark) {
+		return all[len(mark):], true
+	}
+	return all, false
+}
+
+// lastLineLooksLikePrompt 检查文本最后一行是否像 shell 提示符
+// 支持 PowerShell(PS C:\>)、bash(user@host:~$)、cmd(C:\>)、root(#) 等
+func lastLineLooksLikePrompt(text string) bool {
+	lines := strings.Split(text, "\n")
+	// 从后往前找第一个非空行
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		// 常见提示符结尾：> (PowerShell/cmd)、$ (bash)、# (root)、% (csh/zsh)
+		if strings.HasSuffix(line, ">") || strings.HasSuffix(line, "$") || strings.HasSuffix(line, "#") || strings.HasSuffix(line, "%") {
+			// 启发式：真正的提示符通常包含路径分隔符、@、:、~ 等，或者是很短的单字符提示符
+			// 避免将普通文本（如 echo "a > b"）误判为提示符
+			if strings.ContainsAny(line, "\\/:@~") || strings.HasPrefix(line, "PS ") || len(line) < 10 {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func (s *Session) startOutputReader(ctx context.Context) {
@@ -778,22 +958,14 @@ func (p *SessionPool) Cleanup() {
 	})
 }
 
-func generateSessionID() string {
-	return generateUUID()
-}
+var (
+	sessionIDCounter int64
+	sessionIDMu      sync.Mutex
+)
 
-func generateUUID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%s-%s-%s-%s-%s",
-		hex.EncodeToString(b[0:4]),
-		hex.EncodeToString(b[4:6]),
-		hex.EncodeToString(b[6:8]),
-		hex.EncodeToString(b[8:10]),
-		hex.EncodeToString(b[10:16]),
-	)
+func generateSessionID() string {
+	sessionIDMu.Lock()
+	defer sessionIDMu.Unlock()
+	sessionIDCounter++
+	return fmt.Sprintf("%06d", sessionIDCounter)
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +31,22 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	// 检测系统可用Shell并预热缓存
+	shells := DetectAvailableShells()
+	if len(shells) > 0 {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Detected %d available shells: ", len(shells)))
+		for i, s := range shells {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%s(%s)", s.Name, s.Path))
+		}
+		log.Println(sb.String())
+	} else {
+		log.Println("Warning: no available shells detected")
 	}
 
 	// 设置gin为release模式

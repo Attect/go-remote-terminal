@@ -70,6 +70,50 @@ func StripANSI(data []byte) string {
 	return buf.String()
 }
 
+// NormalizeCR 模拟终端的 \r 行为，将回车控制符转换为干净的文本
+// \r\n → 普通换行
+// 单独的 \r → 清空当前行（模拟回车不换行，后续内容覆盖当前行）
+// \n → 普通换行
+func NormalizeCR(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	var line []byte
+	i := 0
+	for i < len(data) {
+		c := data[i]
+		if c == '\r' {
+			if i+1 < len(data) && data[i+1] == '\n' {
+				// \r\n：当作普通换行
+				buf.Write(line)
+				buf.WriteByte('\n')
+				line = line[:0]
+				i += 2
+				continue
+			}
+			// 单独 \r：清空当前行（回车不换行，后续覆盖）
+			line = line[:0]
+		} else if c == '\n' {
+			buf.Write(line)
+			buf.WriteByte('\n')
+			line = line[:0]
+		} else {
+			line = append(line, c)
+		}
+		i++
+	}
+	buf.Write(line)
+	return buf.Bytes()
+}
+
+// CleanTerminalOutput 去除ANSI控制序列并归一化\r回车符，返回干净的文本
+func CleanTerminalOutput(data []byte) string {
+	stripped := StripANSI(data)
+	normalized := NormalizeCR([]byte(stripped))
+	return string(normalized)
+}
+
 // ==================== 轻量 VT 模拟器 ====================
 
 // VTScreen 轻量虚拟终端，维护字符网格

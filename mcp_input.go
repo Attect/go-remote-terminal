@@ -101,5 +101,10 @@ func ParseKeyInput(keyName string) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported Alt combination: %s", keyName)
 	}
 
+	// 单字符键名（如 "C", "a", "1"），直接作为普通按键发送
+	if len(keyName) == 1 {
+		return []byte{keyName[0]}, nil
+	}
+
 	return nil, fmt.Errorf("unknown key: %s", keyName)
 }
